@@ -1,305 +1,319 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Receipt, Plus, Search, CheckCircle, Tag, X } from "lucide-react";
-import { formatCurrency, formatShortDate } from "@/lib/utils";
+import React, { useState, useEffect, useMemo } from "react";
+import { Plus, Receipt, CheckCircle, Tag } from "lucide-react";
+import {
+  PageHeader,
+  DataTable,
+  ColumnDef,
+  StatusBadge,
+  Modal,
+  FormField,
+  Input,
+  Select,
+  Textarea,
+  CurrencyDisplay,
+  Pagination,
+} from "@/components/shared";
+import { formatShortDate } from "@/lib/utils";
+import { useDataQuery } from "@/hooks/useDataQuery";
 
+interface ExpenseItem {
+  _id: string;
+  expenseNumber: string;
+  date: string;
+  categoryName?: string;
+  amount: number;
+  payee?: string;
+  description: string;
+  status: string;
+}
+
+interface OptionItem {
+  _id: string;
+  name?: string;
+  accountName?: string;
+  type?: string;
+}
+
+/**
+ * ExpensesPage - Refactored with Reusable Components adhering to SOLID
+ */
 export default function ExpensesPage() {
-  const [expenses, setExpenses] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [accounts, setAccounts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // Modal
+  const [categories, setCategories] = useState<OptionItem[]>([]);
+  const [accounts, setAccounts] = useState<OptionItem[]>([]);
   const [showModal, setShowModal] = useState(false);
-  const [categoryId, setCategoryId] = useState("");
-  const [accountId, setAccountId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [payee, setPayee] = useState("");
-  const [description, setDescription] = useState("");
+
+  // Form State
+  const [formData, setFormData] = useState({
+    categoryId: "",
+    accountId: "",
+    amount: "",
+    payee: "",
+    description: "",
+  });
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
+
+  const {
+    data: expenses,
+    loading,
+    page,
+    totalPages,
+    total,
+    setPage,
+    refetch,
+  } = useDataQuery<ExpenseItem>({
+    url: "/api/v1/expenses",
+  });
 
   useEffect(() => {
-    fetchExpenses();
-    fetchCategories();
-    fetchAccounts();
+    fetchOptions();
   }, []);
 
-  const fetchExpenses = async () => {
+  const fetchOptions = async () => {
     try {
-      setLoading(true);
-      const res = await fetch("/api/v1/expenses");
-      const json = await res.json();
-      if (json.success) setExpenses(json.data || []);
+      const [catRes, accRes] = await Promise.all([
+        fetch("/api/v1/expenses/categories").then((r) => r.json()),
+        fetch("/api/v1/accounts").then((r) => r.json()),
+      ]);
+
+      if (catRes.success && catRes.data?.length > 0) {
+        setCategories(catRes.data);
+        setFormData((prev) => ({ ...prev, categoryId: catRes.data[0]._id }));
+      }
+
+      if (accRes.success && accRes.data?.length > 0) {
+        const liquid = accRes.data.filter(
+          (a: { type: string }) => a.type === "asset" || a.type === "bank" || a.type === "cash"
+        );
+        setAccounts(liquid.length > 0 ? liquid : accRes.data);
+        if (liquid.length > 0) {
+          setFormData((prev) => ({ ...prev, accountId: liquid[0]._id }));
+        }
+      }
     } catch (err) {
       console.error(err);
-    } finally {
-      setLoading(false);
     }
   };
 
-  const fetchCategories = async () => {
-    try {
-      const res = await fetch("/api/v1/expenses/categories");
-      const json = await res.json();
-      if (json.success) {
-        setCategories(json.data || []);
-        if (json.data?.length > 0 && !categoryId) setCategoryId(json.data[0]._id);
-      }
-    } catch {
-      // ignore
-    }
+  const handleFormChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+  ) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const fetchAccounts = async () => {
-    try {
-      const res = await fetch("/api/v1/accounts");
-      const json = await res.json();
-      if (json.success) {
-        const liquid = json.data.filter(
-          (a: any) =>
-            a.type === "asset" &&
-            ["cash", "bank", "mfs_bkash", "mfs_nagad", "mfs_rocket"].includes(
-              a.subType
-            )
-        );
-        setAccounts(liquid);
-        if (liquid.length > 0 && !accountId) setAccountId(liquid[0]._id);
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const handleRecordExpense = async (e: React.FormEvent) => {
+  const handleCreateExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    setError("");
+    setFormError("");
 
     try {
       const res = await fetch("/api/v1/expenses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          categoryId,
-          accountId,
-          amount: parseFloat(amount) || 0,
-          payee,
-          description,
+          ...formData,
+          amount: parseFloat(formData.amount) || 0,
         }),
       });
 
       const json = await res.json();
       if (!res.ok || !json.success) {
-        throw new Error(json.message || "Failed to record expense");
+        throw new Error(json.message || "Failed to log expense");
       }
 
       setShowModal(false);
-      setAmount("");
-      setPayee("");
-      setDescription("");
-      fetchExpenses();
+      setFormData((prev) => ({
+        ...prev,
+        amount: "",
+        payee: "",
+        description: "",
+      }));
+      await refetch();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Error posting expense");
+      setFormError(err instanceof Error ? err.message : "Error logging expense");
     } finally {
       setSaving(false);
     }
   };
 
+  const columns: ColumnDef<ExpenseItem>[] = useMemo(
+    () => [
+      {
+        header: "Voucher #",
+        cell: (e) => (
+          <div>
+            <div className="font-semibold text-slate-900">{e.expenseNumber}</div>
+            <div className="text-[10px] text-slate-400">{formatShortDate(e.date)}</div>
+          </div>
+        ),
+      },
+      {
+        header: "Category",
+        cell: (e) => (
+          <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
+            <Tag className="h-3 w-3 text-slate-400" />
+            {e.categoryName || "General Expense"}
+          </span>
+        ),
+      },
+      {
+        header: "Payee / Beneficiary",
+        cell: (e) => <span className="text-slate-600">{e.payee || "—"}</span>,
+      },
+      {
+        header: "Description / Purpose",
+        accessorKey: "description",
+      },
+      {
+        header: "Amount (৳)",
+        align: "right",
+        cell: (e) => <CurrencyDisplay amount={e.amount} />,
+      },
+      {
+        header: "Status",
+        align: "center",
+        cell: (e) => <StatusBadge status={e.status} />,
+      },
+    ],
+    []
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900">
-            Operating Expenses & Overhead
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Warehouse rent, staff salaries, utilities, freight, and general administration
-          </p>
-        </div>
+      <PageHeader
+        title="Operating Expenses Ledger"
+        description="Record and track operational overheads, utility bills, and vendor disbursements"
+        actions={
+          <button
+            type="button"
+            onClick={() => setShowModal(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-sky-600 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Record Expense</span>
+          </button>
+        }
+      />
 
-        <button
-          onClick={() => setShowModal(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-sky-600 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Record Expense</span>
-        </button>
-      </div>
+      <DataTable
+        columns={columns}
+        data={expenses}
+        loading={loading}
+        emptyMessage="No expense records logged yet. Click 'Record Expense' to add one."
+      />
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-50/75 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              <tr>
-                <th className="px-5 py-3.5">Expense Ref #</th>
-                <th className="px-4 py-3.5">Category</th>
-                <th className="px-4 py-3.5">Payee</th>
-                <th className="px-4 py-3.5">Description</th>
-                <th className="px-4 py-3.5">Payment Account</th>
-                <th className="px-4 py-3.5">Amount (৳)</th>
-                <th className="px-4 py-3.5">Date</th>
-                <th className="px-4 py-3.5">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-xs text-slate-400">
-                    Loading expenses...
-                  </td>
-                </tr>
-              ) : expenses.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-xs text-slate-400">
-                    No operating expenses recorded yet.
-                  </td>
-                </tr>
-              ) : (
-                expenses.map((exp) => (
-                  <tr key={exp._id} className="hover:bg-slate-50/50">
-                    <td className="px-5 py-3.5 font-mono font-bold text-slate-900">
-                      {exp.expenseNumber}
-                    </td>
-                    <td className="px-4 py-3.5 font-semibold text-slate-700">
-                      {exp.categoryId?.name}
-                    </td>
-                    <td className="px-4 py-3.5 text-slate-800">{exp.payee}</td>
-                    <td className="px-4 py-3.5 text-slate-600">{exp.description}</td>
-                    <td className="px-4 py-3.5 text-slate-500">{exp.accountId?.name}</td>
-                    <td className="px-4 py-3.5 font-bold text-red-600">
-                      {formatCurrency(exp.amount)}
-                    </td>
-                    <td className="px-4 py-3.5 text-slate-400 text-[11px]">
-                      {formatShortDate(exp.date)}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                        {exp.approvalStatus}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        onPageChange={setPage}
+      />
 
-      {/* Record Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-base font-semibold text-slate-900">Record Operating Expense</h3>
-              <button
-                onClick={() => setShowModal(false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"
-              >
-                <X className="h-4 w-4" />
-              </button>
+      <Modal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        title="Record Operating Expense"
+        description="Book operational disbursements against the appropriate Chart of Accounts."
+        size="md"
+        loading={saving}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowModal(false)}
+              className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="expense-form"
+              disabled={saving}
+              className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-sky-600 transition-colors disabled:opacity-50"
+            >
+              {saving ? "Posting..." : "Post Expense Voucher"}
+            </button>
+          </>
+        }
+      >
+        <form id="expense-form" onSubmit={handleCreateExpense} className="space-y-3.5">
+          {formError && (
+            <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 border border-red-200">
+              {formError}
             </div>
+          )}
 
-            {error && (
-              <div className="mt-3 rounded-lg bg-red-50 p-2 text-xs text-red-700 border border-red-200">
-                {error}
-              </div>
-            )}
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Expense Category" required>
+              <Select
+                name="categoryId"
+                value={formData.categoryId}
+                onChange={handleFormChange}
+                required
+              >
+                {categories.map((c) => (
+                  <option key={c._id} value={c._id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
 
-            <form onSubmit={handleRecordExpense} className="mt-4 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Category</label>
-                <select
-                  required
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                >
-                  {categories.map((c) => (
-                    <option key={c._id} value={c._id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Payment Account</label>
-                <select
-                  required
-                  value={accountId}
-                  onChange={(e) => setAccountId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                >
-                  {accounts.map((a) => (
-                    <option key={a._id} value={a._id}>
-                      {a.name} (Balance: ৳{a.balance})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700">Amount (৳)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    step="0.01"
-                    required
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="৳ 2,500.00"
-                    className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700">Payee / Vendor</label>
-                  <input
-                    type="text"
-                    required
-                    value={payee}
-                    onChange={(e) => setPayee(e.target.value)}
-                    placeholder="e.g. Dhaka Power Distribution"
-                    className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Description</label>
-                <textarea
-                  rows={2}
-                  required
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="e.g. Warehouse electricity bill for current month"
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-50"
-                >
-                  {saving ? "Posting..." : "Confirm & Post"}
-                </button>
-              </div>
-            </form>
+            <FormField label="Disbursement Account (Cash/Bank)" required>
+              <Select
+                name="accountId"
+                value={formData.accountId}
+                onChange={handleFormChange}
+                required
+              >
+                {accounts.map((a) => (
+                  <option key={a._id} value={a._id}>
+                    {a.accountName}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
           </div>
-        </div>
-      )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Disbursed Amount (৳ BDT)" required>
+              <Input
+                type="number"
+                name="amount"
+                placeholder="0.00"
+                value={formData.amount}
+                onChange={handleFormChange}
+                min="1"
+                step="0.01"
+                required
+              />
+            </FormField>
+
+            <FormField label="Payee / Recipient">
+              <Input
+                name="payee"
+                placeholder="e.g. Dhaka Power Distribution (DPDC)"
+                value={formData.payee}
+                onChange={handleFormChange}
+              />
+            </FormField>
+          </div>
+
+          <FormField label="Description / Voucher Remarks" required>
+            <Textarea
+              name="description"
+              rows={3}
+              placeholder="e.g. Head office electricity bill for the month of October"
+              value={formData.description}
+              onChange={handleFormChange}
+              required
+            />
+          </FormField>
+        </form>
+      </Modal>
     </div>
   );
 }

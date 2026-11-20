@@ -1,20 +1,24 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useMemo } from "react";
+import { Plus, Building2, Phone, Mail, MapPin } from "lucide-react";
 import {
-  Building2,
-  Plus,
-  Search,
-  Phone,
-  Mail,
-  MapPin,
-  X,
-  CreditCard,
-} from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+  PageHeader,
+  DataTable,
+  ColumnDef,
+  StatusBadge,
+  SearchInput,
+  Modal,
+  FormField,
+  Input,
+  CurrencyDisplay,
+  Pagination,
+} from "@/components/shared";
+import { useDataQuery } from "@/hooks/useDataQuery";
 
 interface VendorItem {
   _id: string;
+  vendorCode?: string;
   name: string;
   companyName: string;
   phone: string;
@@ -27,58 +31,61 @@ interface VendorItem {
   status: string;
 }
 
+/**
+ * VendorsPage - Refactored according to SOLID principles using Reusable Components
+ */
 export default function VendorsPage() {
-  const [vendors, setVendors] = useState<VendorItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-
-  // Modal
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [companyName, setCompanyName] = useState("");
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [address, setAddress] = useState("");
-  const [taxVatNumber, setTaxVatNumber] = useState("");
-  const [openingBalance, setOpeningBalance] = useState("0");
+
+  // Form State
+  const [formData, setFormData] = useState({
+    companyName: "",
+    name: "",
+    phone: "",
+    email: "",
+    address: "",
+    taxVatNumber: "",
+    openingBalance: "0",
+  });
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
 
-  useEffect(() => {
-    fetchVendors();
-  }, [search]);
+  // Reusable Query Hook
+  const {
+    data: vendors,
+    loading,
+    page,
+    totalPages,
+    total,
+    setPage,
+    setParams,
+    refetch,
+  } = useDataQuery<VendorItem>({
+    url: "/api/v1/vendors",
+  });
 
-  const fetchVendors = async () => {
-    try {
-      setLoading(true);
-      const params = search ? `?search=${encodeURIComponent(search)}` : "";
-      const res = await fetch(`/api/v1/vendors${params}`);
-      const json = await res.json();
-      if (json.success) setVendors(json.data || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+  const handleSearch = (searchVal: string) => {
+    setPage(1);
+    setParams((prev) => ({ ...prev, search: searchVal }));
+  };
+
+  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleCreateVendor = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    setError("");
+    setFormError("");
 
     try {
       const res = await fetch("/api/v1/vendors", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          companyName,
-          name,
-          phone,
-          email,
-          address,
-          taxVatNumber,
-          openingBalance: parseFloat(openingBalance) || 0,
+          ...formData,
+          openingBalance: parseFloat(formData.openingBalance) || 0,
         }),
       });
 
@@ -88,197 +95,218 @@ export default function VendorsPage() {
       }
 
       setShowCreateModal(false);
-      setCompanyName("");
-      setName("");
-      setPhone("");
-      setEmail("");
-      setAddress("");
-      fetchVendors();
+      setFormData({
+        companyName: "",
+        name: "",
+        phone: "",
+        email: "",
+        address: "",
+        taxVatNumber: "",
+        openingBalance: "0",
+      });
+      await refetch();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Error creating vendor");
+      setFormError(err instanceof Error ? err.message : "Error creating vendor");
     } finally {
       setSaving(false);
     }
   };
 
+  // Open/Closed: Columns configured declaratively
+  const columns: ColumnDef<VendorItem>[] = useMemo(
+    () => [
+      {
+        header: "Company & Supplier Code",
+        cell: (v) => (
+          <div>
+            <div className="font-semibold text-slate-900">{v.companyName}</div>
+            <div className="text-[10px] text-slate-400 font-mono tracking-wider">
+              {v.vendorCode || v._id.substring(v._id.length - 8).toUpperCase()}
+            </div>
+          </div>
+        ),
+      },
+      {
+        header: "Contact Person",
+        accessorKey: "name",
+      },
+      {
+        header: "Phone Number",
+        cell: (v) => <span className="font-mono text-slate-600">{v.phone}</span>,
+      },
+      {
+        header: "Email Address",
+        cell: (v) => <span className="text-slate-500">{v.email || "—"}</span>,
+      },
+      {
+        header: "Current Payable (৳)",
+        align: "right",
+        cell: (v) => <CurrencyDisplay amount={v.currentPayable} colorScheme="payable" />,
+      },
+      {
+        header: "Status",
+        align: "center",
+        cell: (v) => <StatusBadge status={v.status} />,
+      },
+    ],
+    []
+  );
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900">
-            Vendors & Supplier Management
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Supplier accounts, trade payables (AP), and procurement tracking
-          </p>
-        </div>
+      {/* Reusable Page Header */}
+      <PageHeader
+        title="Vendor & Supplier Management"
+        description="Vendor directory, purchase history, and outstanding payables"
+        actions={
+          <button
+            type="button"
+            onClick={() => setShowCreateModal(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-sky-600 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add New Vendor</span>
+          </button>
+        }
+      />
 
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-sky-600 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add New Vendor</span>
-        </button>
+      {/* Filter Toolbar */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl border border-slate-200/80 bg-white p-4 shadow-xs">
+        <SearchInput
+          placeholder="Search vendors by company, contact person, or phone..."
+          onChange={handleSearch}
+          className="flex-1 max-w-sm"
+        />
       </div>
 
-      {/* Filter Bar */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search suppliers by company, name, phone..."
-            className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-hidden"
-          />
-        </div>
-      </div>
+      {/* Generic Reusable DataTable */}
+      <DataTable
+        columns={columns}
+        data={vendors}
+        loading={loading}
+        emptyMessage="No vendors registered. Click 'Add New Vendor' to create one."
+      />
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-50/75 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              <tr>
-                <th className="px-5 py-3.5">Company Name</th>
-                <th className="px-4 py-3.5">Contact Person</th>
-                <th className="px-4 py-3.5">Phone Number</th>
-                <th className="px-4 py-3.5">Email</th>
-                <th className="px-4 py-3.5">Address</th>
-                <th className="px-4 py-3.5">Current Payable (AP)</th>
-                <th className="px-4 py-3.5">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-xs text-slate-400">
-                    Loading suppliers...
-                  </td>
-                </tr>
-              ) : vendors.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-xs text-slate-400">
-                    No suppliers registered yet.
-                  </td>
-                </tr>
-              ) : (
-                vendors.map((v) => (
-                  <tr key={v._id} className="hover:bg-slate-50/50">
-                    <td className="px-5 py-3.5 font-semibold text-slate-900">
-                      {v.companyName}
-                    </td>
-                    <td className="px-4 py-3.5 text-slate-700">{v.name}</td>
-                    <td className="px-4 py-3.5 font-mono text-slate-600">{v.phone}</td>
-                    <td className="px-4 py-3.5 text-slate-500">{v.email || "N/A"}</td>
-                    <td className="px-4 py-3.5 text-slate-500">{v.address || "N/A"}</td>
-                    <td className="px-4 py-3.5 font-bold text-red-600">
-                      {formatCurrency(v.currentPayable)}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-                        {v.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {/* Reusable Pagination */}
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        onPageChange={setPage}
+      />
 
-      {/* Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-base font-semibold text-slate-900">Add New Supplier / Vendor</h3>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"
-              >
-                <X className="h-4 w-4" />
-              </button>
+      {/* Reusable Modal Form */}
+      <Modal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        title="Add New Vendor / Supplier"
+        description="Record vendor company details, payment contact, and initial opening balance."
+        size="md"
+        loading={saving}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(false)}
+              className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="create-vendor-form"
+              disabled={saving}
+              className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-sky-600 transition-colors disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save Vendor"}
+            </button>
+          </>
+        }
+      >
+        <form id="create-vendor-form" onSubmit={handleCreateVendor} className="space-y-3.5">
+          {formError && (
+            <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 border border-red-200">
+              {formError}
             </div>
+          )}
 
-            {error && (
-              <div className="mt-3 rounded-lg bg-red-50 p-2 text-xs text-red-700 border border-red-200">
-                {error}
-              </div>
-            )}
+          <FormField label="Company Name" required>
+            <Input
+              name="companyName"
+              placeholder="e.g. Meghna Group of Industries"
+              value={formData.companyName}
+              onChange={handleFormChange}
+              required
+            />
+          </FormField>
 
-            <form onSubmit={handleCreateVendor} className="mt-4 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Company Name</label>
-                <input
-                  type="text"
-                  required
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  placeholder="e.g. Acme Industrial Imports Ltd"
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                />
-              </div>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Contact Person Name" required>
+              <Input
+                name="name"
+                placeholder="e.g. Tanvir Ahmed"
+                value={formData.name}
+                onChange={handleFormChange}
+                required
+              />
+            </FormField>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Contact Person Name</label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Tariq Ahmed"
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Phone</label>
-                <input
-                  type="text"
-                  required
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="018XXXXXXXX"
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Email (Optional)</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="sales@supplier.com"
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-50"
-                >
-                  {saving ? "Saving..." : "Save Vendor"}
-                </button>
-              </div>
-            </form>
+            <FormField label="Phone Number" required>
+              <Input
+                name="phone"
+                placeholder="e.g. 01811000000"
+                value={formData.phone}
+                onChange={handleFormChange}
+                required
+              />
+            </FormField>
           </div>
-        </div>
-      )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Email Address">
+              <Input
+                type="email"
+                name="email"
+                placeholder="contact@company.com"
+                value={formData.email}
+                onChange={handleFormChange}
+              />
+            </FormField>
+
+            <FormField label="BIN / Trade License / Tax #">
+              <Input
+                name="taxVatNumber"
+                placeholder="e.g. 123456789-0001"
+                value={formData.taxVatNumber}
+                onChange={handleFormChange}
+              />
+            </FormField>
+          </div>
+
+          <FormField label="Physical / Factory Address">
+            <Input
+              name="address"
+              placeholder="e.g. Tejgaon I/A, Dhaka"
+              value={formData.address}
+              onChange={handleFormChange}
+            />
+          </FormField>
+
+          <FormField
+            label="Opening Balance Payable (৳ BDT)"
+            helperText="Initial company liability owed to this supplier prior to system onboarding."
+          >
+            <Input
+              type="number"
+              name="openingBalance"
+              value={formData.openingBalance}
+              onChange={handleFormChange}
+              min="0"
+              step="100"
+            />
+          </FormField>
+        </form>
+      </Modal>
     </div>
   );
 }

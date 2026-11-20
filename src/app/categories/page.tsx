@@ -1,14 +1,43 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Layers, Plus, Trash2, X, Tag } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { Plus, Layers, Tag, Trash2 } from "lucide-react";
+import {
+  PageHeader,
+  DataTable,
+  ColumnDef,
+  StatusBadge,
+  Modal,
+  FormField,
+  Input,
+  Textarea,
+} from "@/components/shared";
 
+interface CategoryItem {
+  _id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  status: string;
+}
+
+interface BrandItem {
+  _id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  status: string;
+}
+
+/**
+ * CategoriesPage - Refactored with Reusable Components adhering to SOLID
+ */
 export default function CategoriesPage() {
-  const [categories, setCategories] = useState<any[]>([]);
-  const [brands, setBrands] = useState<any[]>([]);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [brands, setBrands] = useState<BrandItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Modal State
+  // Modals
   const [showCatModal, setShowCatModal] = useState(false);
   const [catName, setCatName] = useState("");
   const [catDesc, setCatDesc] = useState("");
@@ -17,8 +46,8 @@ export default function CategoriesPage() {
   const [brandName, setBrandName] = useState("");
   const [brandDesc, setBrandDesc] = useState("");
 
-  const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
     fetchData();
@@ -28,13 +57,12 @@ export default function CategoriesPage() {
     try {
       setLoading(true);
       const [cRes, bRes] = await Promise.all([
-        fetch("/api/v1/categories"),
-        fetch("/api/v1/brands"),
+        fetch("/api/v1/categories").then((r) => r.json()),
+        fetch("/api/v1/brands").then((r) => r.json()),
       ]);
-      const cJson = await cRes.json();
-      const bJson = await bRes.json();
-      if (cJson.success) setCategories(cJson.data || []);
-      if (bJson.success) setBrands(bJson.data || []);
+
+      if (cRes.success) setCategories(cRes.data || []);
+      if (bRes.success) setBrands(bRes.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -45,7 +73,7 @@ export default function CategoriesPage() {
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    setError("");
+    setFormError("");
 
     try {
       const res = await fetch("/api/v1/categories", {
@@ -57,12 +85,13 @@ export default function CategoriesPage() {
       if (!res.ok || !json.success) {
         throw new Error(json.message || "Failed to create category");
       }
+
       setShowCatModal(false);
       setCatName("");
       setCatDesc("");
-      fetchData();
+      await fetchData();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Error saving category");
+      setFormError(err instanceof Error ? err.message : "Error creating category");
     } finally {
       setSaving(false);
     }
@@ -71,7 +100,7 @@ export default function CategoriesPage() {
   const handleCreateBrand = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    setError("");
+    setFormError("");
 
     try {
       const res = await fetch("/api/v1/brands", {
@@ -83,235 +112,244 @@ export default function CategoriesPage() {
       if (!res.ok || !json.success) {
         throw new Error(json.message || "Failed to create brand");
       }
+
       setShowBrandModal(false);
       setBrandName("");
       setBrandDesc("");
-      fetchData();
+      await fetchData();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Error saving brand");
+      setFormError(err instanceof Error ? err.message : "Error creating brand");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDeleteCategory = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this category?")) return;
-    try {
-      const res = await fetch(`/api/v1/categories?id=${id}`, { method: "DELETE" });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        alert(json.message || "Failed to delete category");
-      } else {
-        fetchData();
-      }
-    } catch {
-      alert("Error deleting category");
-    }
-  };
+  const categoryColumns: ColumnDef<CategoryItem>[] = useMemo(
+    () => [
+      {
+        header: "Category Name",
+        cell: (c) => (
+          <div>
+            <div className="font-semibold text-slate-900">{c.name}</div>
+            <div className="text-[10px] text-slate-400 font-mono">slug: {c.slug}</div>
+          </div>
+        ),
+      },
+      {
+        header: "Description",
+        accessorKey: "description",
+      },
+      {
+        header: "Status",
+        align: "center",
+        cell: (c) => <StatusBadge status={c.status} />,
+      },
+    ],
+    []
+  );
+
+  const brandColumns: ColumnDef<BrandItem>[] = useMemo(
+    () => [
+      {
+        header: "Brand Name",
+        cell: (b) => (
+          <div>
+            <div className="font-semibold text-slate-900">{b.name}</div>
+            <div className="text-[10px] text-slate-400 font-mono">slug: {b.slug}</div>
+          </div>
+        ),
+      },
+      {
+        header: "Description",
+        accessorKey: "description",
+      },
+      {
+        header: "Status",
+        align: "center",
+        cell: (b) => <StatusBadge status={b.status} />,
+      },
+    ],
+    []
+  );
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-xl font-bold tracking-tight text-slate-900">
-          Product Categories & Brands
-        </h2>
-        <p className="text-xs text-slate-500 mt-1">
-          Catalog hierarchies, department categorization, and brand trademarks
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-        {/* Categories Section */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-              <Layers className="h-4 w-4 text-primary" />
-              <span>Product Categories</span>
-            </h3>
+    <div className="space-y-6">
+      <PageHeader
+        title="Product Categories & Brands"
+        description="Configure product taxonomy and brand classifications"
+        actions={
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowCatModal(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-sky-600"
+              type="button"
+              onClick={() => {
+                setFormError("");
+                setShowCatModal(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-sky-600 transition-colors"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="h-4 w-4" />
               <span>Add Category</span>
             </button>
-          </div>
-
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase text-slate-500">
-                <tr>
-                  <th className="py-2.5 px-4">Category Name</th>
-                  <th className="py-2.5 px-4">Slug</th>
-                  <th className="py-2.5 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {categories.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="py-6 text-center text-slate-400">
-                      No categories found.
-                    </td>
-                  </tr>
-                ) : (
-                  categories.map((c) => (
-                    <tr key={c._id}>
-                      <td className="py-2.5 px-4 font-semibold text-slate-800">{c.name}</td>
-                      <td className="py-2.5 px-4 text-slate-500 font-mono text-[11px]">{c.slug}</td>
-                      <td className="py-2.5 px-4 text-right">
-                        <button
-                          onClick={() => handleDeleteCategory(c._id)}
-                          className="rounded p-1 text-red-500 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Brands Section */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-              <Tag className="h-4 w-4 text-primary" />
-              <span>Registered Brands</span>
-            </h3>
             <button
-              onClick={() => setShowBrandModal(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-xs hover:bg-slate-50"
+              type="button"
+              onClick={() => {
+                setFormError("");
+                setShowBrandModal(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="h-4 w-4" />
               <span>Add Brand</span>
             </button>
           </div>
+        }
+      />
 
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase text-slate-500">
-                <tr>
-                  <th className="py-2.5 px-4">Brand Name</th>
-                  <th className="py-2.5 px-4">Slug</th>
-                  <th className="py-2.5 px-4">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {brands.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="py-6 text-center text-slate-400">
-                      No brands found.
-                    </td>
-                  </tr>
-                ) : (
-                  brands.map((b) => (
-                    <tr key={b._id}>
-                      <td className="py-2.5 px-4 font-semibold text-slate-800">{b.name}</td>
-                      <td className="py-2.5 px-4 text-slate-500 font-mono text-[11px]">{b.slug}</td>
-                      <td className="py-2.5 px-4">
-                        <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-                          {b.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Categories Section */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Layers className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-semibold text-slate-900">Product Categories</h3>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+              {categories.length}
+            </span>
           </div>
+          <DataTable
+            columns={categoryColumns}
+            data={categories}
+            loading={loading}
+            emptyMessage="No product categories created yet."
+          />
+        </div>
+
+        {/* Brands Section */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Tag className="h-4 w-4 text-emerald-600" />
+            <h3 className="text-sm font-semibold text-slate-900">Product Brands</h3>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+              {brands.length}
+            </span>
+          </div>
+          <DataTable
+            columns={brandColumns}
+            data={brands}
+            loading={loading}
+            emptyMessage="No brands registered yet."
+          />
         </div>
       </div>
 
       {/* Category Modal */}
-      {showCatModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-semibold text-slate-900">Add Product Category</h3>
-              <button onClick={() => setShowCatModal(false)} className="p-1 text-slate-400 hover:bg-slate-100">
-                <X className="h-4 w-4" />
-              </button>
+      <Modal
+        isOpen={showCatModal}
+        onClose={() => setShowCatModal(false)}
+        title="Add New Category"
+        description="Create a product category for grouping catalog items."
+        size="md"
+        loading={saving}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowCatModal(false)}
+              className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="category-form"
+              disabled={saving}
+              className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-sky-600 transition-colors disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save Category"}
+            </button>
+          </>
+        }
+      >
+        <form id="category-form" onSubmit={handleCreateCategory} className="space-y-3.5">
+          {formError && (
+            <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 border border-red-200">
+              {formError}
             </div>
-            {error && <div className="mt-2 text-xs text-red-600">{error}</div>}
-            <form onSubmit={handleCreateCategory} className="mt-4 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Category Name</label>
-                <input
-                  type="text"
-                  required
-                  value={catName}
-                  onChange={(e) => setCatName(e.target.value)}
-                  placeholder="e.g. Electrical Appliances"
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                />
-              </div>
-              <div className="flex justify-end gap-2 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowCatModal(false)}
-                  className="rounded-lg border px-3 py-1.5 text-xs text-slate-600"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs text-white"
-                >
-                  Save
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+          )}
+
+          <FormField label="Category Name" required>
+            <Input
+              value={catName}
+              onChange={(e) => setCatName(e.target.value)}
+              placeholder="e.g. Household & Laundry"
+              required
+            />
+          </FormField>
+
+          <FormField label="Description">
+            <Textarea
+              value={catDesc}
+              onChange={(e) => setCatDesc(e.target.value)}
+              placeholder="Short description of this category"
+              rows={3}
+            />
+          </FormField>
+        </form>
+      </Modal>
 
       {/* Brand Modal */}
-      {showBrandModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-semibold text-slate-900">Add Brand</h3>
-              <button onClick={() => setShowBrandModal(false)} className="p-1 text-slate-400 hover:bg-slate-100">
-                <X className="h-4 w-4" />
-              </button>
+      <Modal
+        isOpen={showBrandModal}
+        onClose={() => setShowBrandModal(false)}
+        title="Add New Brand"
+        description="Register a manufacturing or product brand name."
+        size="md"
+        loading={saving}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowBrandModal(false)}
+              className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="brand-form"
+              disabled={saving}
+              className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-sky-600 transition-colors disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save Brand"}
+            </button>
+          </>
+        }
+      >
+        <form id="brand-form" onSubmit={handleCreateBrand} className="space-y-3.5">
+          {formError && (
+            <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 border border-red-200">
+              {formError}
             </div>
-            {error && <div className="mt-2 text-xs text-red-600">{error}</div>}
-            <form onSubmit={handleCreateBrand} className="mt-4 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Brand Name</label>
-                <input
-                  type="text"
-                  required
-                  value={brandName}
-                  onChange={(e) => setBrandName(e.target.value)}
-                  placeholder="e.g. Samsung"
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                />
-              </div>
-              <div className="flex justify-end gap-2 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowBrandModal(false)}
-                  className="rounded-lg border px-3 py-1.5 text-xs text-slate-600"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs text-white"
-                >
-                  Save
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+          )}
+
+          <FormField label="Brand Name" required>
+            <Input
+              value={brandName}
+              onChange={(e) => setBrandName(e.target.value)}
+              placeholder="e.g. PowerClean"
+              required
+            />
+          </FormField>
+
+          <FormField label="Description">
+            <Textarea
+              value={brandDesc}
+              onChange={(e) => setBrandDesc(e.target.value)}
+              placeholder="Brand details and origin"
+              rows={3}
+            />
+          </FormField>
+        </form>
+      </Modal>
     </div>
   );
 }

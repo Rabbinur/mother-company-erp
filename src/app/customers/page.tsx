@@ -1,18 +1,21 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useMemo } from "react";
+import { Plus, Users, Building2, Phone, MapPin } from "lucide-react";
 import {
-  Users,
-  Plus,
-  Search,
-  Phone,
-  MapPin,
-  CreditCard,
-  X,
-  FileText,
-  DollarSign,
-} from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+  PageHeader,
+  DataTable,
+  ColumnDef,
+  StatusBadge,
+  SearchInput,
+  Modal,
+  FormField,
+  Input,
+  Select,
+  CurrencyDisplay,
+  Pagination,
+} from "@/components/shared";
+import { useDataQuery } from "@/hooks/useDataQuery";
 
 interface CustomerItem {
   _id: string;
@@ -30,308 +33,323 @@ interface CustomerItem {
   status: string;
 }
 
+const DISTRICT_OPTIONS = [
+  { value: "", label: "All Districts" },
+  { value: "Dhaka", label: "Dhaka" },
+  { value: "Chittagong", label: "Chittagong" },
+  { value: "Sylhet", label: "Sylhet" },
+  { value: "Rajshahi", label: "Rajshahi" },
+  { value: "Khulna", label: "Khulna" },
+  { value: "Barisal", label: "Barisal" },
+  { value: "Rangpur", label: "Rangpur" },
+  { value: "Mymensingh", label: "Mymensingh" },
+];
+
+const TYPE_OPTIONS = [
+  { value: "retailer", label: "Retailer" },
+  { value: "wholesaler", label: "Wholesaler" },
+  { value: "distributor", label: "Distributor" },
+];
+
+/**
+ * CustomersPage - Refactored according to SOLID principles using Reusable Components
+ */
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<CustomerItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
   const [districtFilter, setDistrictFilter] = useState("");
-
-  // Modal
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [shopName, setShopName] = useState("");
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [district, setDistrict] = useState("Dhaka");
-  const [customerType, setCustomerType] = useState("retailer");
-  const [creditLimit, setCreditLimit] = useState("50000");
+
+  // Form State
+  const [formData, setFormData] = useState({
+    shopName: "",
+    name: "",
+    phone: "",
+    district: "Dhaka",
+    customerType: "retailer",
+    creditLimit: "50000",
+  });
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
 
-  useEffect(() => {
-    fetchCustomers();
-  }, [search, districtFilter]);
+  // Reusable Query Hook (Single Responsibility for data state)
+  const {
+    data: customers,
+    loading,
+    page,
+    totalPages,
+    total,
+    setPage,
+    setParams,
+    refetch,
+  } = useDataQuery<CustomerItem>({
+    url: "/api/v1/customers",
+    initialParams: { district: districtFilter },
+  });
 
-  const fetchCustomers = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams();
-      if (search) params.append("search", search);
-      if (districtFilter) params.append("district", districtFilter);
+  const handleSearch = (searchVal: string) => {
+    setPage(1);
+    setParams((prev) => ({ ...prev, search: searchVal }));
+  };
 
-      const res = await fetch(`/api/v1/customers?${params.toString()}`);
-      const json = await res.json();
-      if (json.success) setCustomers(json.data || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+  const handleDistrictChange = (district: string) => {
+    setDistrictFilter(district);
+    setPage(1);
+    setParams((prev) => ({ ...prev, district }));
+  };
+
+  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    setError("");
+    setFormError("");
 
     try {
       const res = await fetch("/api/v1/customers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          shopName,
-          name,
-          phone,
-          district,
-          customerType,
-          creditLimit: parseFloat(creditLimit) || 0,
+          ...formData,
+          creditLimit: parseFloat(formData.creditLimit) || 0,
         }),
       });
 
       const json = await res.json();
       if (!res.ok || !json.success) {
-        throw new Error(json.message || "Failed to create customer");
+        throw new Error(json.message || "Failed to create retailer");
       }
 
       setShowCreateModal(false);
-      setShopName("");
-      setName("");
-      setPhone("");
-      fetchCustomers();
+      setFormData({
+        shopName: "",
+        name: "",
+        phone: "",
+        district: "Dhaka",
+        customerType: "retailer",
+        creditLimit: "50000",
+      });
+      await refetch();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Error creating customer");
+      setFormError(err instanceof Error ? err.message : "Error creating customer");
     } finally {
       setSaving(false);
     }
   };
 
+  // Open/Closed: Column definitions declaratively configured
+  const columns: ColumnDef<CustomerItem>[] = useMemo(
+    () => [
+      {
+        header: "Shop Name & Code",
+        cell: (c) => (
+          <div>
+            <div className="font-semibold text-slate-900">{c.shopName}</div>
+            <div className="text-[10px] text-slate-400 font-mono tracking-wider">
+              {c.customerCode}
+            </div>
+          </div>
+        ),
+      },
+      {
+        header: "Owner / Contact",
+        accessorKey: "name",
+      },
+      {
+        header: "Phone Number",
+        cell: (c) => <span className="font-mono text-slate-600">{c.phone}</span>,
+      },
+      {
+        header: "District",
+        cell: (c) => (
+          <span className="inline-flex items-center gap-1 text-slate-600">
+            <MapPin className="h-3 w-3 text-slate-400" />
+            {c.district || "Dhaka"}
+          </span>
+        ),
+      },
+      {
+        header: "Type",
+        cell: (c) => (
+          <span className="uppercase text-[10px] font-semibold tracking-wider text-slate-500">
+            {c.customerType}
+          </span>
+        ),
+      },
+      {
+        header: "Credit Limit",
+        align: "right",
+        cell: (c) => <CurrencyDisplay amount={c.creditLimit} />,
+      },
+      {
+        header: "Current Receivable",
+        align: "right",
+        cell: (c) => <CurrencyDisplay amount={c.currentReceivable} colorScheme="receivable" />,
+      },
+      {
+        header: "Status",
+        align: "center",
+        cell: (c) => <StatusBadge status={c.status} />,
+      },
+    ],
+    []
+  );
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900">
-            Customers & Retailer Network
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Retailer registry, credit limits, and receivables ledger
-          </p>
-        </div>
+      {/* Reusable Page Header */}
+      <PageHeader
+        title="Customers & Retailer Network"
+        description="Retailer registry, credit limits, and receivables ledger"
+        actions={
+          <button
+            type="button"
+            onClick={() => setShowCreateModal(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-sky-600 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add New Retailer</span>
+          </button>
+        }
+      />
 
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-sky-600 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add New Retailer</span>
-        </button>
-      </div>
+      {/* Filter Toolbar */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl border border-slate-200/80 bg-white p-4 shadow-xs">
+        <SearchInput
+          placeholder="Search by shop name, owner, phone, code..."
+          onChange={handleSearch}
+          className="flex-1 max-w-sm"
+        />
 
-      {/* Filter Bar */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by shop name, owner, phone..."
-            className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-hidden"
+        <div className="flex items-center gap-2">
+          <Select
+            options={DISTRICT_OPTIONS}
+            value={districtFilter}
+            onChange={(e) => handleDistrictChange(e.target.value)}
+            className="w-40"
           />
         </div>
-
-        <select
-          value={districtFilter}
-          onChange={(e) => setDistrictFilter(e.target.value)}
-          className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 focus:bg-white focus:outline-hidden"
-        >
-          <option value="">All Districts</option>
-          <option value="Dhaka">Dhaka</option>
-          <option value="Chittagong">Chittagong</option>
-          <option value="Sylhet">Sylhet</option>
-          <option value="Rajshahi">Rajshahi</option>
-          <option value="Khulna">Khulna</option>
-          <option value="Barisal">Barisal</option>
-          <option value="Rangpur">Rangpur</option>
-          <option value="Mymensingh">Mymensingh</option>
-        </select>
       </div>
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-50/75 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              <tr>
-                <th className="px-5 py-3.5">Shop Name & Code</th>
-                <th className="px-4 py-3.5">Owner / Contact</th>
-                <th className="px-4 py-3.5">Phone Number</th>
-                <th className="px-4 py-3.5">District</th>
-                <th className="px-4 py-3.5">Type</th>
-                <th className="px-4 py-3.5">Credit Limit</th>
-                <th className="px-4 py-3.5">Current Receivable</th>
-                <th className="px-4 py-3.5">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-xs text-slate-400">
-                    Loading retailer directory...
-                  </td>
-                </tr>
-              ) : customers.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-xs text-slate-400">
-                    No retailers found. Click &apos;Add New Retailer&apos; to register one.
-                  </td>
-                </tr>
-              ) : (
-                customers.map((c) => (
-                  <tr key={c._id} className="hover:bg-slate-50/50">
-                    <td className="px-5 py-3.5">
-                      <div className="font-semibold text-slate-900">{c.shopName}</div>
-                      <div className="text-[10px] text-slate-400 font-mono">{c.customerCode}</div>
-                    </td>
-                    <td className="px-4 py-3.5 text-slate-700">{c.name}</td>
-                    <td className="px-4 py-3.5 font-mono text-slate-600">{c.phone}</td>
-                    <td className="px-4 py-3.5 text-slate-600">{c.district || "Dhaka"}</td>
-                    <td className="px-4 py-3.5 uppercase text-[10px] font-medium text-slate-500">
-                      {c.customerType}
-                    </td>
-                    <td className="px-4 py-3.5 font-medium text-slate-700">
-                      {formatCurrency(c.creditLimit)}
-                    </td>
-                    <td className="px-4 py-3.5 font-bold text-red-600">
-                      {formatCurrency(c.currentReceivable)}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                          c.status === "active"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-red-50 text-red-700"
-                        }`}
-                      >
-                        {c.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {/* Generic Reusable DataTable */}
+      <DataTable
+        columns={columns}
+        data={customers}
+        loading={loading}
+        emptyMessage="No retailers found. Click 'Add New Retailer' to register one."
+      />
 
-      {/* Create Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-base font-semibold text-slate-900">Add New Retailer Shop</h3>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"
-              >
-                <X className="h-4 w-4" />
-              </button>
+      {/* Reusable Pagination */}
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        onPageChange={setPage}
+      />
+
+      {/* Reusable Modal Form */}
+      <Modal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        title="Register New Retailer Shop"
+        description="Enter customer shop details, credit limit, and territory information."
+        size="md"
+        loading={saving}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(false)}
+              className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="create-customer-form"
+              disabled={saving}
+              className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-sky-600 transition-colors disabled:opacity-50"
+            >
+              {saving ? "Registering..." : "Save Retailer"}
+            </button>
+          </>
+        }
+      >
+        <form id="create-customer-form" onSubmit={handleCreateCustomer} className="space-y-3.5">
+          {formError && (
+            <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 border border-red-200">
+              {formError}
             </div>
+          )}
 
-            {error && (
-              <div className="mt-3 rounded-lg bg-red-50 p-2 text-xs text-red-700 border border-red-200">
-                {error}
-              </div>
-            )}
+          <FormField label="Shop Name" required>
+            <Input
+              name="shopName"
+              placeholder="e.g. Al-Madina General Store"
+              value={formData.shopName}
+              onChange={handleFormChange}
+              required
+            />
+          </FormField>
 
-            <form onSubmit={handleCreateCustomer} className="mt-4 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Shop Name</label>
-                <input
-                  type="text"
-                  required
-                  value={shopName}
-                  onChange={(e) => setShopName(e.target.value)}
-                  placeholder="e.g. Al-Madina Super Store"
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                />
-              </div>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Owner / Contact Person" required>
+              <Input
+                name="name"
+                placeholder="e.g. Mohammad Rahim"
+                value={formData.name}
+                onChange={handleFormChange}
+                required
+              />
+            </FormField>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Owner Name</label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Haji Mohammad Ali"
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700">Phone Number</label>
-                <input
-                  type="text"
-                  required
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="017XXXXXXXX"
-                  className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700">District</label>
-                  <select
-                    value={district}
-                    onChange={(e) => setDistrict(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                  >
-                    <option value="Dhaka">Dhaka</option>
-                    <option value="Chittagong">Chittagong</option>
-                    <option value="Sylhet">Sylhet</option>
-                    <option value="Rajshahi">Rajshahi</option>
-                    <option value="Khulna">Khulna</option>
-                    <option value="Barisal">Barisal</option>
-                    <option value="Rangpur">Rangpur</option>
-                    <option value="Mymensingh">Mymensingh</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700">Credit Limit (৳)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={creditLimit}
-                    onChange={(e) => setCreditLimit(e.target.value)}
-                    placeholder="50000"
-                    className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-xs focus:outline-hidden focus:border-primary"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-sky-600 disabled:opacity-50"
-                >
-                  {saving ? "Saving..." : "Register Retailer"}
-                </button>
-              </div>
-            </form>
+            <FormField label="Phone Number" required>
+              <Input
+                name="phone"
+                placeholder="e.g. 01711000000"
+                value={formData.phone}
+                onChange={handleFormChange}
+                required
+              />
+            </FormField>
           </div>
-        </div>
-      )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Territory / District">
+              <Select
+                name="district"
+                value={formData.district}
+                onChange={handleFormChange}
+                options={DISTRICT_OPTIONS.filter((d) => d.value !== "")}
+              />
+            </FormField>
+
+            <FormField label="Customer Type">
+              <Select
+                name="customerType"
+                value={formData.customerType}
+                onChange={handleFormChange}
+                options={TYPE_OPTIONS}
+              />
+            </FormField>
+          </div>
+
+          <FormField
+            label="Credit Limit (৳ BDT)"
+            helperText="Maximum allowed outstanding credit balance before orders require manual approval."
+          >
+            <Input
+              type="number"
+              name="creditLimit"
+              value={formData.creditLimit}
+              onChange={handleFormChange}
+              min="0"
+              step="1000"
+            />
+          </FormField>
+        </form>
+      </Modal>
     </div>
   );
 }
