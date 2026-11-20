@@ -1,0 +1,185 @@
+import mongoose from "mongoose";
+import { Product } from "@/models/Product";
+import { ProductVariant } from "@/models/ProductVariant";
+import { InventoryBalance } from "@/models/InventoryBalance";
+import { Warehouse } from "@/models/Warehouse";
+import { Order, IOrder } from "@/models/Order";
+import { OrderService } from "./OrderService";
+
+export interface FieldSalesProductItem {
+  id: string;
+  variantId: string;
+  name: string;
+  sku: string;
+  category?: string;
+  image?: string;
+  customerPrice: number; // default sales price to retailers
+  retailPrice: number; // suggested resale price
+  availableStock: number;
+  status: string;
+}
+
+export class FieldSalesService {
+  /**
+   * Catalog for Field Sales reps.
+   * STRICT SECURITY RULE: Never expose Purchase Price through this endpoint!
+   */
+  static async getCatalog(): Promise<FieldSalesProductItem[]> {
+    // Find Central Warehouse
+    let centralWarehouse = await Warehouse.findOne({ isCentral: true });
+    if (!centralWarehouse) {
+      centralWarehouse = await Warehouse.findOne({ status: "active" });
+    }
+
+    const wId = centralWarehouse?._id;
+
+    const variants = await ProductVariant.find({ status: "active" })
+      .populate("productId")
+      .lean();
+
+    const catalog: FieldSalesProductItem[] = [];
+
+    for (const v of variants) {
+      const prod = v.productId as unknown as {
+        _id: mongoose.Types.ObjectId;
+        name: string;
+        categoryId?: mongoose.Types.ObjectId;
+        images?: string[];
+        status: string;
+      } | null;
+      if (!prod || prod.status !== "active") continue;
+
+      let availableStock = 0;
+      if (wId) {
+        const bal = await InventoryBalance.findOne({
+          warehouseId: wId,
+          productId: prod._id,
+          variantId: v._id,
+        }).lean();
+        if (bal) {
+          availableStock = Math.max(0, bal.onHandQuantity - bal.reservedQuantity);
+        }
+      }
+
+      catalog.push({
+        id: String(prod._id),
+        variantId: String(v._id),
+        name: `${prod.name} - ${v.variantName}`,
+        sku: v.sku,
+        category: prod.categoryId ? String(prod.categoryId) : undefined,
+        image: v.image || (Array.isArray(prod.images) ? prod.images[0] : undefined),
+        customerPrice: v.customerPrice,
+        retailPrice: v.retailPrice,
+        availableStock,
+        status: v.status,
+      });
+    }
+
+    return catalog;
+  }
+
+  /**
+   * Field Sales Atomic Order Reservation
+   * Authenticates, checks idempotency, retrieves authoritative prices, reserves stock atomically,
+   * and creates the Mother Company Order.
+   */
+  static async reserveOrder(params: {
+    customerId: string;
+    externalOrderId: string;
+    idempotencyKey: string;
+    items: Array<{
+      productId: string;
+      variantId: string;
+      quantity: number;
+    }>;
+    notes?: string;
+  }): Promise<{
+    orderId: string;
+    orderNumber: string;
+    reservationId: string;
+    grandTotal: number;
+    itemsCount: number;
+    status: string;
+  }> {
+    if (!params.idempotencyKey) {
+      throw new Error("Missing required 'idempotencyKey'");
+    }
+
+    // Check existing order with this idempotency key
+    const existing = await Order.findOne({ idempotencyKey: params.idempotencyKey });
+    if (existing) {
+      return {
+        orderId: String(existing._id),
+        orderNumber: existing.orderNumber,
+        reservationId: String(existing.reservationId || ""),
+        grandTotal: existing.grandTotal,
+        itemsCount: existing.items.length,
+        status: existing.orderStatus,
+      };
+    }
+
+    // Identify Central Warehouse
+    let warehouse = await Warehouse.findOne({ isCentral: true });
+    if (!warehouse) {
+      warehouse = await Warehouse.findOne({ status: "active" });
+    }
+    if (!warehouse) {
+      throw new Error("Central warehouse not configured in Mother Company");
+    }
+
+    // Reuse the exact same underlying OrderService & InventoryService!
+    const order = await OrderService.createOrder({
+      customerId: params.customerId,
+      warehouseId: warehouse._id as mongoose.Types.ObjectId,
+      source: "field_sales",
+      externalOrderId: params.externalOrderId,
+      idempotencyKey: params.idempotencyKey,
+      items: params.items.map((i) => ({
+        productId: i.productId,
+        variantId: i.variantId,
+        quantity: i.quantity,
+      })),
+      notes: params.notes,
+      autoConfirmAndReserve: true, // atomically reserves stock!
+    });
+
+    return {
+      orderId: String(order._id),
+      orderNumber: order.orderNumber,
+      reservationId: String(order.reservationId || ""),
+      grandTotal: order.grandTotal,
+      itemsCount: order.items.length,
+      status: order.orderStatus,
+    };
+  }
+
+  /**
+   * Cancel Field Sales Order & safely release reservations
+   */
+  static async cancelOrder(
+    orderIdOrNumber: string,
+    reason?: string
+  ): Promise<IOrder> {
+    let order: IOrder | null = null;
+    if (mongoose.Types.ObjectId.isValid(orderIdOrNumber)) {
+      order = await Order.findById(orderIdOrNumber);
+    }
+    if (!order) {
+      order = await Order.findOne({
+        $or: [
+          { orderNumber: orderIdOrNumber },
+          { externalOrderId: orderIdOrNumber },
+        ],
+      });
+    }
+
+    if (!order) {
+      throw new Error("Order not found");
+    }
+
+    return OrderService.cancelOrder(
+      order._id as mongoose.Types.ObjectId,
+      reason || "Cancelled by Field Sales System"
+    );
+  }
+}

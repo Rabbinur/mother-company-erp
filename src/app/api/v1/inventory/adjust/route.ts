@@ -1,0 +1,69 @@
+import { NextRequest } from "next/server";
+import { connectDB } from "@/lib/db/connect";
+import { Warehouse } from "@/models/Warehouse";
+import { requirePermission } from "@/lib/auth/session";
+import { PERMISSIONS } from "@/lib/auth/permissions";
+import { InventoryService } from "@/services/InventoryService";
+import { AuditService } from "@/services/AuditService";
+import {
+  successResponse,
+  errorResponse,
+  unauthorizedResponse,
+  forbiddenResponse,
+} from "@/lib/utils/api-response";
+
+export async function POST(req: NextRequest) {
+  const { user, authorized } = await requirePermission(
+    req,
+    PERMISSIONS.INVENTORY_ADJUST
+  );
+  if (!user) return unauthorizedResponse();
+  if (!authorized) return forbiddenResponse();
+
+  try {
+    await connectDB();
+    const body = await req.json();
+    const { productId, variantId, adjustmentQty, reason } = body;
+
+    if (!productId || !variantId || adjustmentQty === undefined || !reason) {
+      return errorResponse(
+        "Product ID, Variant ID, Adjustment Quantity, and Reason are required",
+        400
+      );
+    }
+
+    let warehouseId = body.warehouseId;
+    if (!warehouseId) {
+      const central = await Warehouse.findOne({ isCentral: true });
+      warehouseId = central?._id;
+    }
+
+    const updated = await InventoryService.adjustStock({
+      warehouseId,
+      productId,
+      variantId,
+      adjustmentQty: Number(adjustmentQty),
+      reason,
+      actorId: user.userId,
+    });
+
+    await AuditService.log({
+      actorId: user.userId,
+      actorEmail: user.email,
+      action: "STOCK_ADJUSTMENT",
+      entityType: "inventory",
+      entityId: String(variantId),
+      afterSnapshot: {
+        adjustmentQty,
+        reason,
+        newOnHand: updated.onHandQuantity,
+        newAvailable: updated.availableQuantity,
+      },
+    });
+
+    return successResponse(updated, "Stock adjusted successfully");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Failed to adjust stock";
+    return errorResponse(msg, 500);
+  }
+}
