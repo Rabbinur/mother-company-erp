@@ -26,11 +26,15 @@ yarn-error.log*
 
 # local env files
 .env*.local
-.env
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 
-.env.*
 node_modules
+
+# agent skills (already installed globally in ~/.gemini/config/skills/)
+.agents/
+.agent/
+skills-lock.json
+config.bat
