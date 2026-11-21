@@ -7,10 +7,15 @@ const JWT_SECRET =
 
 export interface TokenPayload {
   userId: string;
+  businessId?: string;
+  activeDealershipId?: string;
   email: string;
   name: string;
   role: string;
+  tokenVersion?: number;
   permissions?: string[];
+  iat?: number;
+  exp?: number;
 }
 
 export function signToken(payload: TokenPayload, expiresIn = "7d"): string {

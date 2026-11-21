@@ -1,0 +1,267 @@
+import crypto from "crypto";
+import mongoose from "mongoose";
+import { connectDB } from "@/lib/db/connect";
+import { User, IUser } from "@/models/User";
+import { Business, IBusiness } from "@/models/Business";
+import { Dealership, IDealership } from "@/models/Dealership";
+import { DealershipMembership, IDealershipMembership } from "@/models/DealershipMembership";
+import { SupportTicket } from "@/models/SupportTicket";
+import { AuditLog } from "@/models/AuditLog";
+import { TokenPayload } from "./jwt";
+import { LEGACY_CUTOFF_TIMESTAMP, SYSTEM_MIGRATION_DEPLOYED_AT } from "./constants";
+
+export interface IAuthoritativeTenancyContext {
+  user: IUser;
+  business: IBusiness;
+  dealership: IDealership;
+  membership?: IDealershipMembership;
+  role: string;
+  isOwner: boolean;
+  isEmergencyReadOnly: boolean;
+}
+
+export class TenancySecurityError extends Error {
+  statusCode: number;
+  code: string;
+  constructor(message: string, statusCode = 403, code = "TENANCY_FORBIDDEN") {
+    super(message);
+    this.name = "TenancySecurityError";
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
+
+const SUPPORT_ROUTE_ALLOWLIST = [
+  /^\/api\/v1\/orders(\/.*)?$/,
+  /^\/api\/v1\/inventory(\/.*)?$/,
+  /^\/api\/v1\/reports(\/.*)?$/,
+  /^\/api\/v1\/audit-logs(\/.*)?$/,
+  /^\/api\/v1\/products(\/.*)?$/,
+];
+
+function verifyHmacToken(rawToken: string, expectedBusinessId: string): { ticketId: string; expiresAt: Date } {
+  const parts = rawToken.split(".");
+  if (parts.length !== 3) {
+    throw new TenancySecurityError("Malformed emergency access token structure", 403, "INVALID_TOKEN_FORMAT");
+  }
+  const [ticketId, expiresAtStr, signature] = parts;
+  const hmacSecret = process.env.SUPPORT_HMAC_SECRET || "mother_erp_support_hmac_default_secret_key_2026";
+
+  const payload = `${ticketId}:${expectedBusinessId}:${expiresAtStr}`;
+  const expectedSignature = crypto.createHmac("sha256", hmacSecret).update(payload).digest("hex");
+
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+    throw new TenancySecurityError("Invalid cryptographic emergency token signature", 403, "HMAC_SIGNATURE_MISMATCH");
+  }
+
+  const expiresAt = new Date(Number(expiresAtStr));
+  if (isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) {
+    throw new TenancySecurityError("Cryptographic emergency token has expired", 403, "TOKEN_EXPIRED");
+  }
+
+  return { ticketId, expiresAt };
+}
+
+function canonicalizePath(rawPath: string): string {
+  let decoded = decodeURIComponent(rawPath);
+  if (decoded.includes("..") || decoded.includes("//")) {
+    throw new TenancySecurityError("Malformed URI path segment detected", 400, "MALFORMED_URI");
+  }
+  return decoded.toLowerCase();
+}
+
+export async function assertDealershipAccess(params: {
+  tokenPayload: TokenPayload;
+  httpMethod: string;
+  requestPath: string;
+  headers: Record<string, string | undefined>;
+  requestedDealershipId?: string;
+  clientIp?: string;
+  userAgent?: string;
+}): Promise<IAuthoritativeTenancyContext> {
+  await connectDB();
+
+  // Strip method override headers
+  if (params.headers["x-http-method-override"] || params.headers["x-method-override"]) {
+    throw new TenancySecurityError("HTTP method override headers are strictly prohibited", 400, "METHOD_OVERRIDE_PROHIBITED");
+  }
+
+  const isMutation = params.httpMethod !== "GET" && params.httpMethod !== "HEAD";
+  const canonicalPath = canonicalizePath(params.requestPath);
+
+  // 1. Authoritative DB User Verification
+  const user = await User.findOne({ _id: params.tokenPayload.userId, isDeleted: { $ne: true } });
+  if (!user || user.status !== "active") {
+    throw new TenancySecurityError("User account is inactive, suspended, or deleted", 401, "ACCOUNT_INACTIVE");
+  }
+
+  // 2. Strict Database tokenVersion Integrity
+  if (typeof user.tokenVersion !== "number" || isNaN(user.tokenVersion)) {
+    throw new TenancySecurityError("User security profile corrupted. Administrative repair required", 401, "USER_SECURITY_PROFILE_CORRUPTED");
+  }
+
+  // 3. Dual Issuance & Server-Time Legacy Token Validation
+  const tokenIatMs = (params.tokenPayload.iat ?? 0) * 1000;
+  if (!tokenIatMs || tokenIatMs > Date.now() + 60000) {
+    throw new TenancySecurityError("Token issuance timestamp (iat) is invalid or in the future", 401, "INVALID_IAT");
+  }
+
+  if (params.tokenPayload.tokenVersion === undefined) {
+    // Must have been issued before migration
+    if (tokenIatMs >= SYSTEM_MIGRATION_DEPLOYED_AT.getTime()) {
+      throw new TenancySecurityError("Tokens issued after migration must include tokenVersion", 401, "TOKEN_VERSION_MISSING");
+    }
+    // Must be within 24-hr grace period
+    if (Date.now() >= LEGACY_CUTOFF_TIMESTAMP.getTime()) {
+      throw new TenancySecurityError("Legacy grace period expired. Re-authentication required", 401, "LEGACY_SESSION_EXPIRED");
+    }
+    // Legacy mutations rejected immediately
+    if (isMutation) {
+      throw new TenancySecurityError("Security upgrade requires re-authentication for data modifications", 401, "LEGACY_TOKEN_UPGRADE_REQUIRED");
+    }
+    if (user.tokenVersion > 1) {
+      throw new TenancySecurityError("Session invalidated due to user privilege changes", 401, "SESSION_REVOKED");
+    }
+  } else {
+    // Modern tokenVersion strict comparison
+    if (params.tokenPayload.tokenVersion !== user.tokenVersion) {
+      throw new TenancySecurityError("Session token version mismatch. Access revoked", 401, "SESSION_REVOKED");
+    }
+  }
+
+  // 4. Resolve Target Dealership
+  if (!params.requestedDealershipId) {
+    throw new TenancySecurityError("Explicit dealership context is required", 400, "DEALERSHIP_REQUIRED");
+  }
+
+  const dealership = await Dealership.findOne({
+    _id: params.requestedDealershipId,
+    status: "active",
+    isDeleted: false,
+  });
+
+  if (!dealership) {
+    throw new TenancySecurityError("Dealership not found or inactive", 404, "DEALERSHIP_NOT_FOUND");
+  }
+
+  // 5. Authoritative Business Ownership Verification
+  const business = await Business.findOne({
+    _id: dealership.businessId,
+    status: "active",
+    isDeleted: false,
+  });
+
+  if (!business) {
+    throw new TenancySecurityError("Parent business organization not found or inactive", 404, "BUSINESS_NOT_FOUND");
+  }
+
+  // 6. Super Admin Emergency Access Gateway
+  const isSuperAdminRole = user.role === "super_admin";
+  let isEmergencyReadOnly = false;
+
+  if (isSuperAdminRole) {
+    const rawEmergencyToken = params.headers["x-admin-emergency-token"];
+    if (!rawEmergencyToken) {
+      throw new TenancySecurityError("Super-admin commercial access prohibited without emergency token", 403, "EMERGENCY_AUTH_REQUIRED");
+    }
+
+    if (isMutation) {
+      throw new TenancySecurityError("Super-admin emergency access is strictly READ-ONLY", 403, "MUTATION_PROHIBITED");
+    }
+
+    // Verify route allowlist
+    const isAllowedRoute = SUPPORT_ROUTE_ALLOWLIST.some((regex) => regex.test(canonicalPath));
+    if (!isAllowedRoute) {
+      throw new TenancySecurityError("Route excluded from emergency support allowlist", 403, "ROUTE_NOT_PERMITTED");
+    }
+
+    // Cryptographic HMAC token validation
+    const { ticketId } = verifyHmacToken(rawEmergencyToken, String(business._id));
+
+    // Database ticket authorization
+    const ticket = await SupportTicket.findOne({
+      ticketId,
+      businessId: business._id,
+      status: "approved",
+      isRevoked: false,
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!ticket) {
+      throw new TenancySecurityError("Support ticket not found, expired, or revoked", 403, "TICKET_INVALID");
+    }
+
+    // Enforce 2-hour maximum lifetime
+    const maxAllowedExpiry = ticket.createdAt.getTime() + 2 * 60 * 60 * 1000;
+    if (ticket.expiresAt.getTime() > maxAllowedExpiry) {
+      throw new TenancySecurityError("Support ticket lifetime exceeds maximum 2-hour ceiling", 403, "TICKET_LIFETIME_EXCEEDED");
+    }
+
+    // Two-person rule: requester cannot be approver
+    if (ticket.requestedBy.equals(ticket.approvedBy)) {
+      throw new TenancySecurityError("Support ticket violates two-person separation of duty", 403, "TICKET_SEPARATION_VIOLATION");
+    }
+
+    isEmergencyReadOnly = true;
+  }
+
+  const isOwner = user.role === "owner" && business.ownerId.equals(user._id);
+
+  // 7. Role & Membership Resolution
+  let membership: IDealershipMembership | undefined;
+  let resolvedRole = user.role;
+
+  if (isEmergencyReadOnly) {
+    resolvedRole = "emergency_support_auditor";
+  } else if (isOwner) {
+    resolvedRole = "owner";
+  } else {
+    const liveMembership = await DealershipMembership.findOne({
+      userId: user._id,
+      businessId: business._id,
+      dealershipId: dealership._id,
+      isDeleted: false,
+    });
+
+    if (!liveMembership || liveMembership.status !== "active") {
+      throw new TenancySecurityError(`User does not hold an active membership in dealership '${dealership.name}'`, 403, "MEMBERSHIP_REQUIRED");
+    }
+
+    membership = liveMembership;
+    resolvedRole = liveMembership.role;
+  }
+
+  // 8. Fail-Closed Audit Logging
+  if (isEmergencyReadOnly || (isOwner && isMutation)) {
+    try {
+      await AuditLog.create({
+        actorId: user._id,
+        actorEmail: user.email,
+        action: isEmergencyReadOnly ? "EMERGENCY_SUPPORT_READ" : "OWNER_DEALERSHIP_MUTATION",
+        entityType: "dealership_boundary",
+        entityId: String(dealership._id),
+        source: isEmergencyReadOnly ? "emergency_gateway" : "owner_dashboard",
+        ipAddress: params.clientIp,
+        userAgent: params.userAgent,
+        afterSnapshot: {
+          businessId: String(business._id),
+          dealershipId: String(dealership._id),
+          path: canonicalPath,
+          role: resolvedRole,
+        },
+      });
+    } catch {
+      throw new TenancySecurityError("Security Audit failure: Log write failed. Operation terminated.", 500, "AUDIT_FAILURE");
+    }
+  }
+
+  return {
+    user,
+    business,
+    dealership,
+    membership,
+    role: resolvedRole,
+    isOwner,
+    isEmergencyReadOnly,
+  };
+}
