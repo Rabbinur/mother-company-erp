@@ -49,39 +49,41 @@ export class WarehouseService {
     const limit = Math.max(1, Math.min(100, params.limit || 20));
     const skip = (page - 1) * limit;
 
-    const query: Record<string, unknown> = {
-      $or: [{ businessId }, { businessId: { $exists: false } }],
-      isDeleted: { $ne: true },
-    };
+    const andClauses: Record<string, unknown>[] = [
+      { $or: [{ businessId }, { businessId: { $exists: false } }] },
+      { isDeleted: { $ne: true } },
+    ];
 
     if (params.status) {
-      query.status = params.status;
+      andClauses.push({ status: params.status });
     }
 
     if (params.isCentral !== undefined) {
-      query.isCentral = params.isCentral;
+      andClauses.push({ isCentral: params.isCentral });
     }
 
     if (params.dealershipId) {
       // Warehouse either explicitly serves this dealership or is a central warehouse
-      query.$or = [
-        { dealershipIds: new mongoose.Types.ObjectId(params.dealershipId) },
-        { isCentral: true },
-      ];
+      andClauses.push({
+        $or: [
+          { dealershipIds: new mongoose.Types.ObjectId(params.dealershipId) },
+          { isCentral: true },
+        ],
+      });
     }
 
     if (params.search) {
       const term = params.search.trim();
-      query.$and = [
-        {
-          $or: [
-            { name: { $regex: term, $options: "i" } },
-            { code: { $regex: term, $options: "i" } },
-            { contactPerson: { $regex: term, $options: "i" } },
-          ],
-        },
-      ];
+      andClauses.push({
+        $or: [
+          { name: { $regex: term, $options: "i" } },
+          { code: { $regex: term, $options: "i" } },
+          { contactPerson: { $regex: term, $options: "i" } },
+        ],
+      });
     }
+
+    const query = { $and: andClauses };
 
     const [items, total] = await Promise.all([
       Warehouse.find(query)
@@ -302,5 +304,16 @@ export class WarehouseService {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Retrieves all warehouses accessible to a specific dealership (central + assigned).
+   */
+  static async getWarehousesForDealership(
+    businessId: string | mongoose.Types.ObjectId,
+    dealershipId: string | mongoose.Types.ObjectId
+  ): Promise<IWarehouse[]> {
+    const res = await this.list(businessId, { dealershipId: String(dealershipId), limit: 100 });
+    return res.items;
   }
 }
