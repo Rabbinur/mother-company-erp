@@ -148,7 +148,7 @@ export function formatRollbackOutput(result: RollbackEngineResult): string {
     lines.push(`  Migration Run ID : ${result.planReport.migrationRunId}`);
     lines.push(`  Rollback Run ID  : ${result.planReport.rollbackRunId}`);
     lines.push(
-      `  Safety Gates     : Freeze=${g.layerAFreeze.passed ? "PASS" : "FAIL"} | Oplog=${g.layerBOplog.passed ? "PASS" : "FAIL"} | Integrity=${g.layerCIntegrity.passed ? "PASS" : "FAIL"}`
+      `  Safety Gates     : Freeze=${g.layerAFreeze.status || (g.layerAFreeze.passed ? "PASS" : "FAIL")} | Oplog=${g.layerBOplog.status || (g.layerBOplog.passed ? "PASS" : "FAIL")} | Integrity=${g.layerCIntegrity.status || (g.layerCIntegrity.passed ? "PASS" : "FAIL")}`
     );
     lines.push(
       `  Documents        : Total=${s.totalMigratedDocuments} | Safe=${s.safeToRestoreCount} | Conflict=${s.conflictCount} | MissingPreImage=${s.missingPreImageCount} | Blocked=${s.blockedCount}`

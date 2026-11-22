@@ -55,6 +55,18 @@ export const PERMISSIONS = {
   SETTINGS_MANAGE: "settings.manage",
   INTEGRATIONS_MANAGE: "integrations.manage",
   AUDIT_VIEW: "audit.view",
+
+  // Business Foundation & Organization
+  BUSINESS_VIEW: "business.view",
+  BUSINESS_MANAGE: "business.manage",
+  PRINCIPAL_COMPANIES_VIEW: "principal_companies.view",
+  PRINCIPAL_COMPANIES_MANAGE: "principal_companies.manage",
+  DEALERSHIPS_VIEW: "dealerships.view",
+  DEALERSHIPS_MANAGE: "dealerships.manage",
+  WAREHOUSES_VIEW: "warehouses.view",
+  WAREHOUSES_MANAGE: "warehouses.manage",
+  MEMBERSHIPS_VIEW: "memberships.view",
+  MEMBERSHIPS_MANAGE: "memberships.manage",
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -63,6 +75,7 @@ export const ALL_PERMISSIONS: Permission[] = Object.values(PERMISSIONS);
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, Permission[]> = {
   super_admin: [...ALL_PERMISSIONS],
+  owner: [...ALL_PERMISSIONS],
   admin: [...ALL_PERMISSIONS],
   manager: [
     PERMISSIONS.PRODUCTS_VIEW,

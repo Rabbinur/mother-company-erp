@@ -313,3 +313,161 @@ export async function assertDealershipAccess(params: {
     isEmergencyReadOnly,
   };
 }
+
+export interface IAuthoritativeBusinessContext {
+  user: IUser;
+  business: IBusiness;
+  role: string;
+  isOwner: boolean;
+  isEmergencyReadOnly: boolean;
+}
+
+/**
+ * Authoritatively verifies access to a business organization.
+ * Strictly derives business from server-side authenticated identity and prevents
+ * cross-business tampering or unauthorized access.
+ */
+export async function assertBusinessAccess(params: {
+  tokenPayload: TokenPayload;
+  httpMethod: string;
+  requestPath: string;
+  headers: Record<string, string | undefined>;
+  requestedBusinessId?: string;
+  clientIp?: string;
+  userAgent?: string;
+}): Promise<IAuthoritativeBusinessContext> {
+  await connectDB();
+
+  // Strip method override headers
+  if (params.headers["x-http-method-override"] || params.headers["x-method-override"]) {
+    throw new TenancySecurityError(
+      "HTTP method override headers are strictly prohibited",
+      400,
+      "METHOD_OVERRIDE_PROHIBITED"
+    );
+  }
+
+  const isMutation = params.httpMethod !== "GET" && params.httpMethod !== "HEAD";
+  const canonicalPath = canonicalizePath(params.requestPath);
+
+  // 1. Authoritative DB User Verification
+  const user = await User.findOne({ _id: params.tokenPayload.userId, isDeleted: { $ne: true } });
+  if (!user || user.status !== "active") {
+    throw new TenancySecurityError("User account is inactive, suspended, or deleted", 401, "ACCOUNT_INACTIVE");
+  }
+
+  // 2. Strict Database tokenVersion Integrity
+  if (typeof user.tokenVersion !== "number" || isNaN(user.tokenVersion)) {
+    throw new TenancySecurityError(
+      "User security profile corrupted. Administrative repair required",
+      401,
+      "USER_SECURITY_PROFILE_CORRUPTED"
+    );
+  }
+
+  // TokenVersion check
+  if (params.tokenPayload.tokenVersion !== undefined && params.tokenPayload.tokenVersion !== user.tokenVersion) {
+    throw new TenancySecurityError("Session token version mismatch. Access revoked", 401, "SESSION_REVOKED");
+  }
+
+  // 3. Resolve Target Business (Server-side derivation with tampering prevention)
+  let business: IBusiness | null = null;
+  const isSuperAdminRole = user.role === "super_admin";
+
+  if (isSuperAdminRole) {
+    if (!params.requestedBusinessId) {
+      throw new TenancySecurityError("Super-admin access requires explicit businessId target", 400, "BUSINESS_REQUIRED");
+    }
+    business = await Business.findOne({ _id: params.requestedBusinessId, isDeleted: false });
+  } else {
+    // Determine user's authoritative business
+    if (user.businessId) {
+      // If client supplied a businessId, it MUST match the user's businessId
+      if (params.requestedBusinessId && params.requestedBusinessId !== user.businessId.toString()) {
+        throw new TenancySecurityError(
+          "Cross-business access strictly prohibited: requested business does not match user business",
+          403,
+          "CROSS_BUSINESS_FORBIDDEN"
+        );
+      }
+      business = await Business.findOne({ _id: user.businessId, isDeleted: false });
+    } else if (user.role === "owner") {
+      // Owner without user.businessId set, resolve via Business.ownerId
+      business = await Business.findOne({ ownerId: user._id, isDeleted: false });
+      if (business && params.requestedBusinessId && params.requestedBusinessId !== business._id.toString()) {
+        throw new TenancySecurityError(
+          "Cross-business access strictly prohibited: requested business does not belong to owner",
+          403,
+          "CROSS_BUSINESS_FORBIDDEN"
+        );
+      }
+    }
+  }
+
+  if (!business || business.status !== "active") {
+    throw new TenancySecurityError("Business organization not found or inactive", 404, "BUSINESS_NOT_FOUND");
+  }
+
+  // 4. Super Admin Emergency Access Gateway
+  let isEmergencyReadOnly = false;
+  if (isSuperAdminRole) {
+    const rawEmergencyToken = params.headers["x-admin-emergency-token"];
+    if (!rawEmergencyToken) {
+      throw new TenancySecurityError("Super-admin commercial access prohibited without emergency token", 403, "EMERGENCY_AUTH_REQUIRED");
+    }
+
+    if (isMutation) {
+      throw new TenancySecurityError("Super-admin emergency access is strictly READ-ONLY", 403, "MUTATION_PROHIBITED");
+    }
+
+    const { ticketId } = verifyHmacToken(rawEmergencyToken, String(business._id));
+
+    const ticket = await SupportTicket.findOne({
+      ticketId,
+      businessId: business._id,
+      status: "approved",
+      isRevoked: false,
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!ticket) {
+      throw new TenancySecurityError("Support ticket not found, expired, or revoked", 403, "TICKET_INVALID");
+    }
+
+    isEmergencyReadOnly = true;
+  }
+
+  const isOwner = user.role === "owner" && business.ownerId.equals(user._id);
+  const resolvedRole = isEmergencyReadOnly ? "emergency_support_auditor" : isOwner ? "owner" : user.role;
+
+  // 5. Audit Logging for mutations or emergency reads
+  if (isEmergencyReadOnly || (isOwner && isMutation) || (user.role === "admin" && isMutation)) {
+    try {
+      await AuditLog.create({
+        actorId: user._id,
+        actorEmail: user.email,
+        action: isEmergencyReadOnly ? "EMERGENCY_SUPPORT_READ" : "BUSINESS_ORGANIZATION_MUTATION",
+        entityType: "business_boundary",
+        entityId: String(business._id),
+        source: isEmergencyReadOnly ? "emergency_gateway" : "business_admin",
+        ipAddress: params.clientIp,
+        userAgent: params.userAgent,
+        afterSnapshot: {
+          businessId: String(business._id),
+          path: canonicalPath,
+          role: resolvedRole,
+        },
+      });
+    } catch {
+      throw new TenancySecurityError("Security Audit failure: Log write failed. Operation terminated.", 500, "AUDIT_FAILURE");
+    }
+  }
+
+  return {
+    user,
+    business,
+    role: resolvedRole,
+    isOwner,
+    isEmergencyReadOnly,
+  };
+}

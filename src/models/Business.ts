@@ -2,6 +2,7 @@ import mongoose, { Schema, Document, Model } from "mongoose";
 
 export interface IBusiness extends Document {
   name: string;
+  legalName?: string;
   code: string;
   ownerId: mongoose.Types.ObjectId;
   status: "active" | "inactive" | "suspended";
@@ -18,6 +19,7 @@ export interface IBusiness extends Document {
 const BusinessSchema = new Schema<IBusiness>(
   {
     name: { type: String, required: true, trim: true },
+    legalName: { type: String, trim: true },
     code: {
       type: String,
       required: true,

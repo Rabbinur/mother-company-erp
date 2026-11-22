@@ -14,6 +14,7 @@ import type { MigrationAuditEntry } from "./audit-manifest";
 import { loadAndVerifyPreImage, type GridFsChunk } from "./pre-image-loader";
 import {
   detectPostMigrationMutations,
+  hashCurrentDocument,
   type TargetDocumentEvaluation,
 } from "./mutation-detector";
 import {
@@ -84,6 +85,26 @@ export function buildRollbackPlan(options: RollbackPlannerOptions): RollbackPlan
       collName
     );
     allEvaluations.push(...detectionResult.evaluations);
+
+    // Also include any unrecorded new documents as CONFLICT
+    for (const unrecorded of detectionResult.unrecordedTargetDocuments) {
+      allEvaluations.push({
+        targetId: unrecorded._id?.toString() || "UNKNOWN",
+        sourceId:
+          unrecorded.sourceBaselineId?.toString() ||
+          unrecorded._id?.toString() ||
+          "UNRECORDED",
+        sourceCollection: collName,
+        targetCollection: collName,
+        recordedAfterHash: "NONE_UNRECORDED_NEW_RECORD",
+        currentHash: hashCurrentDocument(unrecorded),
+        status: "CONFLICT",
+        conflictReason:
+          "UNRECORDED_NEW_DOCUMENT: New document was inserted into target collection post-migration",
+        hasMutated: true,
+        currentDoc: unrecorded,
+      });
+    }
   }
 
   // 2. Build Document Plans
@@ -97,18 +118,25 @@ export function buildRollbackPlan(options: RollbackPlannerOptions): RollbackPlan
     let status: RestorationEligibilityStatus = "SAFE_TO_RESTORE";
     let conflictReason = evalItem.conflictReason;
 
-    // Check if duplicate restoration target was detected
     const targetCount = duplicateTargetMap.get(evalItem.sourceId) || 0;
-    if (targetCount > 1) {
+
+    if (!preImage) {
+      if (evalItem.conflictReason?.includes("UNRECORDED_NEW_DOCUMENT")) {
+        status = "CONFLICT";
+        conflictReason = evalItem.conflictReason;
+        conflictingSourceIds.add(evalItem.sourceId);
+      } else {
+        status = "MISSING_PREIMAGE";
+        conflictReason = `MISSING_PREIMAGE: No verified pre-image archive exists for legacy ID: ${evalItem.sourceId}`;
+        conflictingSourceIds.add(evalItem.sourceId);
+      }
+    } else if (targetCount > 1) {
       status = "CONFLICT";
       conflictReason = `DUPLICATE_TARGET: Multiple pre-images or partitions target the same legacy ID: ${evalItem.sourceId}`;
       conflictingSourceIds.add(evalItem.sourceId);
     } else if (evalItem.status === "CONFLICT") {
       status = "CONFLICT";
-      conflictingSourceIds.add(evalItem.sourceId);
-    } else if (!preImage) {
-      status = "MISSING_PREIMAGE";
-      conflictReason = `MISSING_PREIMAGE: No verified pre-image archive exists for legacy ID: ${evalItem.sourceId}`;
+      conflictReason = evalItem.conflictReason;
       conflictingSourceIds.add(evalItem.sourceId);
     } else {
       // Validate Pre-Image Integrity & Hash
@@ -160,18 +188,11 @@ export function buildRollbackPlan(options: RollbackPlannerOptions): RollbackPlan
   }
 
   // 3. Evaluate Three-Layer Safety Gates
-  const defaultOplogOptions: OplogAuditOptions = options.oplogOptions || {
-    migrationCompletedAt: new Date(Date.now() - 3600000),
-    targetNamespaces: ["inventorybalances", "orders"],
-    oplogEntries: [],
-    hasReadPrivileges: true,
-  };
-
   const safetyResult: ThreeLayerSafetyResult = evaluateThreeLayerSafety({
     coordinatorId,
     minEpoch: options.minEpoch ?? 1,
     lockPayload: options.lockPayload,
-    oplogOptions: defaultOplogOptions,
+    oplogOptions: options.oplogOptions,
     documentEvaluations: allEvaluations,
   });
 

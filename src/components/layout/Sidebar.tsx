@@ -23,6 +23,9 @@ import {
   ChevronRight,
   LogOut,
   Sliders,
+  Store,
+  Briefcase,
+  Network,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +38,11 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Dealerships", href: "/dealerships", icon: Store },
+  { label: "Principal Companies", href: "/principal-companies", icon: Briefcase },
+  { label: "Warehouses", href: "/warehouses", icon: Warehouse },
+  { label: "Dealership Staff", href: "/dealership-memberships", icon: Network },
+  { label: "Business Settings", href: "/business", icon: Sliders },
   { label: "Products & Variants", href: "/products", icon: Package },
   { label: "Categories & Brands", href: "/categories", icon: Layers },
   { label: "Pricing Management", href: "/pricing", icon: Tags },

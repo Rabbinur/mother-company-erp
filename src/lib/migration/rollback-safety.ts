@@ -17,7 +17,7 @@ export interface RollbackSafetyEvaluationOptions {
   coordinatorId: string;
   minEpoch?: number;
   lockPayload?: MigrationLockPayload;
-  oplogOptions: OplogAuditOptions;
+  oplogOptions?: OplogAuditOptions;
   documentEvaluations: TargetDocumentEvaluation[];
 }
 
@@ -40,9 +40,10 @@ export function evaluateLayerAFreeze(
   if (!lockPayload) {
     return {
       passed: false,
+      status: "NOT_CONFIGURED",
       layer: "LAYER_A_FREEZE",
       name: "Maintenance Freeze Gate",
-      message: "FAILED: Migration maintenance lock document is missing. Active freeze required.",
+      message: "NOT_CONFIGURED: Migration maintenance lock document is missing. Active freeze required.",
       details: { coordinatorId },
     };
   }
@@ -52,6 +53,7 @@ export function evaluateLayerAFreeze(
   if (!check.isValid) {
     return {
       passed: false,
+      status: "FAIL",
       layer: "LAYER_A_FREEZE",
       name: "Maintenance Freeze Gate",
       message: `FAILED: Maintenance freeze verification failed: ${check.error}`,
@@ -67,6 +69,7 @@ export function evaluateLayerAFreeze(
 
   return {
     passed: true,
+    status: "PASS",
     layer: "LAYER_A_FREEZE",
     name: "Maintenance Freeze Gate",
     message: "PASSED: Maintenance freeze is active, lock owned by coordinator, epoch fresh.",
@@ -77,12 +80,24 @@ export function evaluateLayerAFreeze(
 /**
  * Evaluates Layer B (Oplog Inspection): Inspected window complete, zero external writes, no rollover.
  */
-export function evaluateLayerBOplog(oplogOptions: OplogAuditOptions): RollbackSafetyLayerResult {
+export function evaluateLayerBOplog(oplogOptions?: OplogAuditOptions): RollbackSafetyLayerResult {
+  if (!oplogOptions || oplogOptions.isConfigured === false) {
+    return {
+      passed: false,
+      status: "NOT_CONFIGURED",
+      layer: "LAYER_B_OPLOG",
+      name: "Replica Set Oplog Inspection Gate",
+      message: "NOT_CONFIGURED: Replica set oplog inspection is not configured or no oplog evidence provided.",
+      details: { isConfigured: false },
+    };
+  }
+
   const check = auditReplicaSetOplog(oplogOptions);
 
   if (!check.canProceed) {
     return {
       passed: false,
+      status: "FAIL",
       layer: "LAYER_B_OPLOG",
       name: "Replica Set Oplog Inspection Gate",
       message: `FAILED: ${check.message}`,
@@ -97,6 +112,7 @@ export function evaluateLayerBOplog(oplogOptions: OplogAuditOptions): RollbackSa
 
   return {
     passed: true,
+    status: "PASS",
     layer: "LAYER_B_OPLOG",
     name: "Replica Set Oplog Inspection Gate",
     message: "PASSED: Complete oplog inspected with zero post-migration business mutations.",
@@ -111,6 +127,17 @@ export function evaluateLayerBOplog(oplogOptions: OplogAuditOptions): RollbackSa
 export function evaluateLayerCIntegrity(
   evaluations: TargetDocumentEvaluation[]
 ): RollbackSafetyLayerResult {
+  if (!evaluations || evaluations.length === 0) {
+    return {
+      passed: false,
+      status: "NOT_VERIFIED",
+      layer: "LAYER_C_INTEGRITY",
+      name: "Document Integrity & Dependency Gate",
+      message: "NOT_VERIFIED: Zero target documents evaluated. Empty dataset or missing migration manifest cannot produce Integrity PASS.",
+      details: { verifiedDocuments: 0 },
+    };
+  }
+
   const conflicts = evaluations.filter((e) => e.status === "CONFLICT");
   const missingPreImages = evaluations.filter((e) => e.status === "MISSING_PREIMAGE");
   const hashMismatches = evaluations.filter((e) => e.status === "HASH_MISMATCH");
@@ -129,6 +156,7 @@ export function evaluateLayerCIntegrity(
   if (conflicts.length > 0 || missingPreImages.length > 0 || hashMismatches.length > 0) {
     return {
       passed: false,
+      status: "FAIL",
       layer: "LAYER_C_INTEGRITY",
       name: "Document Integrity & Dependency Gate",
       message:
@@ -150,6 +178,7 @@ export function evaluateLayerCIntegrity(
 
   return {
     passed: true,
+    status: "PASS",
     layer: "LAYER_C_INTEGRITY",
     name: "Document Integrity & Dependency Gate",
     message: "PASSED: All target documents verified clean and identical to post-migration baseline.",

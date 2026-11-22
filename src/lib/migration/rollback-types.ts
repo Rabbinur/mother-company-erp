@@ -35,8 +35,16 @@ export interface RollbackDocumentPlan {
   dependencies?: string[];
 }
 
+export type SafetyGateStatus =
+  | "PASS"
+  | "FAIL"
+  | "NOT_CONFIGURED"
+  | "NOT_VERIFIED"
+  | "NOT_IMPLEMENTED";
+
 export interface RollbackSafetyLayerResult {
   passed: boolean;
+  status: SafetyGateStatus;
   layer: "LAYER_A_FREEZE" | "LAYER_B_OPLOG" | "LAYER_C_INTEGRITY";
   name: string;
   message: string;

@@ -8,6 +8,9 @@ export interface IDealershipMembership extends Document {
   isPrimary: boolean;
   status: "active" | "inactive" | "suspended";
   permissions: string[];
+  employeeId?: string;
+  designation?: string;
+  department?: string;
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -48,6 +51,9 @@ const DealershipMembershipSchema = new Schema<IDealershipMembership>(
       index: true,
     },
     permissions: [{ type: String, trim: true }],
+    employeeId: { type: String, trim: true },
+    designation: { type: String, trim: true },
+    department: { type: String, trim: true },
     isDeleted: { type: Boolean, default: false, index: true },
   },
   { timestamps: true }

@@ -23,6 +23,7 @@ export interface OplogAuditOptions {
   hasReadPrivileges?: boolean;
   earliestOplogTimestamp?: Date;
   mockRolloverDetected?: boolean;
+  isConfigured?: boolean;
 }
 
 export interface OplogAuditResult {

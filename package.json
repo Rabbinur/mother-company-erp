@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "seed": "node scripts/seed.mjs",
-    "test": "node --experimental-strip-types --import ./tests/register.mjs --test tests/erp-core.test.mjs tests/phase1-tenancy-security.test.mjs tests/preflight-tenancy-check.test.mjs tests/migrate-legacy-tenancy.test.mjs"
+    "test": "node --experimental-strip-types --import ./tests/register.mjs --test tests/erp-core.test.mjs tests/phase1-tenancy-security.test.mjs tests/preflight-tenancy-check.test.mjs tests/migrate-legacy-tenancy.test.mjs tests/rollback-legacy-tenancy.test.mjs tests/migration-e2e-simulation.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
