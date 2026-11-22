@@ -1,13 +1,13 @@
 import crypto from "crypto";
 import mongoose from "mongoose";
 import { connectDB } from "@/lib/db/connect";
-import { User, IUser } from "@/models/User";
-import { Business, IBusiness } from "@/models/Business";
-import { Dealership, IDealership } from "@/models/Dealership";
-import { DealershipMembership, IDealershipMembership } from "@/models/DealershipMembership";
+import { User, type IUser } from "@/models/User";
+import { Business, type IBusiness } from "@/models/Business";
+import { Dealership, type IDealership } from "@/models/Dealership";
+import { DealershipMembership, type IDealershipMembership } from "@/models/DealershipMembership";
 import { SupportTicket } from "@/models/SupportTicket";
 import { AuditLog } from "@/models/AuditLog";
-import { TokenPayload } from "./jwt";
+import type { TokenPayload } from "./jwt";
 import { LEGACY_CUTOFF_TIMESTAMP, SYSTEM_MIGRATION_DEPLOYED_AT } from "./constants";
 
 export interface IAuthoritativeTenancyContext {
@@ -39,24 +39,72 @@ const SUPPORT_ROUTE_ALLOWLIST = [
   /^\/api\/v1\/products(\/.*)?$/,
 ];
 
-function verifyHmacToken(rawToken: string, expectedBusinessId: string): { ticketId: string; expiresAt: Date } {
+/**
+ * Generates a valid HMAC emergency access token for testing or authorized generation.
+ */
+export function generateHmacToken(ticketId: string, businessId: string, expiresAt: Date): string {
+  const hmacSecret = process.env.SUPPORT_HMAC_SECRET || "mother_erp_support_hmac_default_secret_key_2026";
+  const payload = `${ticketId}:${businessId}:${expiresAt.getTime()}`;
+  const signature = crypto.createHmac("sha256", hmacSecret).update(payload).digest("hex");
+  return `${ticketId}.${expiresAt.getTime()}.${signature}`;
+}
+
+/**
+ * Authoritatively verifies emergency access HMAC token.
+ * Token structure: ticketId.expiresAt.signature
+ * Enforces format validation, equal-length checks, and constant-time timingSafeEqual.
+ */
+export function verifyHmacToken(rawToken: string, expectedBusinessId: string): { ticketId: string; expiresAt: Date } {
+  if (!rawToken || typeof rawToken !== "string") {
+    throw new TenancySecurityError(
+      "Emergency access authorization failed: missing or invalid token",
+      403,
+      "INVALID_TOKEN_FORMAT"
+    );
+  }
+
   const parts = rawToken.split(".");
   if (parts.length !== 3) {
-    throw new TenancySecurityError("Malformed emergency access token structure", 403, "INVALID_TOKEN_FORMAT");
+    throw new TenancySecurityError(
+      "Emergency access authorization failed: malformed token structure",
+      403,
+      "INVALID_TOKEN_FORMAT"
+    );
   }
-  const [ticketId, expiresAtStr, signature] = parts;
-  const hmacSecret = process.env.SUPPORT_HMAC_SECRET || "mother_erp_support_hmac_default_secret_key_2026";
 
+  const [ticketId, expiresAtStr, signature] = parts;
+
+  if (!ticketId || !ticketId.trim() || !expiresAtStr || !signature) {
+    throw new TenancySecurityError(
+      "Emergency access authorization failed: incomplete token payload",
+      403,
+      "INVALID_TOKEN_FORMAT"
+    );
+  }
+
+  const hmacSecret = process.env.SUPPORT_HMAC_SECRET || "mother_erp_support_hmac_default_secret_key_2026";
   const payload = `${ticketId}:${expectedBusinessId}:${expiresAtStr}`;
   const expectedSignature = crypto.createHmac("sha256", hmacSecret).update(payload).digest("hex");
 
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
-    throw new TenancySecurityError("Invalid cryptographic emergency token signature", 403, "HMAC_SIGNATURE_MISMATCH");
+  const sigBuf = Buffer.from(signature, "utf-8");
+  const expBuf = Buffer.from(expectedSignature, "utf-8");
+
+  // Constant-time comparison strictly guarded by length check to prevent RangeError
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    throw new TenancySecurityError(
+      "Emergency access authorization failed: invalid token signature",
+      403,
+      "INVALID_TOKEN_SIGNATURE"
+    );
   }
 
   const expiresAt = new Date(Number(expiresAtStr));
   if (isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) {
-    throw new TenancySecurityError("Cryptographic emergency token has expired", 403, "TOKEN_EXPIRED");
+    throw new TenancySecurityError(
+      "Emergency access authorization failed: token has expired",
+      403,
+      "TOKEN_EXPIRED"
+    );
   }
 
   return { ticketId, expiresAt };

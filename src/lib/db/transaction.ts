@@ -9,10 +9,10 @@ export interface TransactionOptions {
   idempotencyKey: string;
   payloadHash: string;
   actorId: mongoose.Types.ObjectId;
-  maxTransientRetries?: number;   // Default: 2
-  maxCommitRetries?: number;      // Default: 3
-  maxCommitTimeMS?: number;       // Default: 4000ms
-  totalDeadlineMS?: number;       // Serverless execution deadline (Default: 8000ms)
+  maxTransientRetries?: number; // Default: 2
+  maxCommitRetries?: number; // Default: 3
+  maxCommitTimeMS?: number; // Default: 4000ms
+  totalDeadlineMS?: number; // Serverless execution deadline (Default: 8000ms)
 }
 
 export class TransactionAmbiguousError extends Error {
@@ -25,7 +25,9 @@ export class TransactionAmbiguousError extends Error {
 }
 
 export async function withTransaction<T>(
-  operation: (session: mongoose.ClientSession) => Promise<{ result: T; entityId?: string }>,
+  operation: (
+    session: mongoose.ClientSession
+  ) => Promise<{ result: T; entityId?: string }>,
   options: TransactionOptions
 ): Promise<T> {
   await connectDB();
@@ -54,20 +56,41 @@ export async function withTransaction<T>(
 
       if (existing) {
         if (existing.payloadHash !== options.payloadHash) {
-          throw new Error("Idempotency conflict: Identical key used with different request payload");
+          throw new Error(
+            "Idempotency conflict: Identical key used with different request payload"
+          );
         }
         if (existing.status === "COMMITTED") {
           return existing.responseSnapshot as T; // Idempotent playback
         }
-        if (existing.status === "PENDING" || existing.status === "RECONCILIATION_REQUIRED") {
+        if (
+          existing.status === "PENDING" ||
+          existing.status === "RECONCILIATION_REQUIRED"
+        ) {
+          // Strictly prevent duplicate execution of business callback!
           throw new TransactionAmbiguousError(
-            "Operation is currently pending or undergoing reconciliation",
+            `Operation '${options.operationType}' is currently ${existing.status.toLowerCase()}. Reconciliation required.`,
             options.idempotencyKey
           );
         }
+        if (existing.status === "ABORTED") {
+          // Prior attempt deterministically aborted before commit. Reset to PENDING for clean retry.
+          await TransactionOutcome.updateOne(
+            { _id: existing._id },
+            {
+              $set: {
+                status: "PENDING",
+                errorMessage: undefined,
+                resolvedAt: undefined,
+                createdAt: new Date(),
+              },
+            }
+          );
+        }
       }
+    } else {
+      throw err;
     }
-    throw err;
   }
 
   const session = await mongoose.startSession();
@@ -81,7 +104,9 @@ export async function withTransaction<T>(
   try {
     while (true) {
       if (Date.now() > deadline) {
-        throw new Error("Transaction deadline exceeded before execution completed");
+        throw new Error(
+          "Transaction deadline exceeded before execution completed"
+        );
       }
 
       transientAttempts++;
@@ -91,16 +116,153 @@ export async function withTransaction<T>(
         maxCommitTimeMS,
       });
 
+      // ─── STAGE 1: BUSINESS OPERATION EXECUTION ──────────────────────
+      let opResult: T;
+      let opEntityId: string | undefined;
+
       try {
-        const { result, entityId } = await operation(session);
-
-        // Commit Retry Loop
-        let commitAttempts = 0;
-        while (true) {
+        const opExecution = await operation(session);
+        opResult = opExecution.result;
+        opEntityId = opExecution.entityId;
+      } catch (businessErr: any) {
+        // Business operation threw error before commit was ever attempted.
+        if (session.inTransaction()) {
           try {
-            await session.commitTransaction();
+            await session.abortTransaction();
+          } catch {
+            // Ignore abort failure
+          }
+        }
 
-            // Mark COMMITTED durably in standalone write
+        const isTransient = businessErr?.hasErrorLabel?.(
+          "TransientTransactionError"
+        );
+        if (
+          isTransient &&
+          transientAttempts <= maxTransientRetries &&
+          Date.now() < deadline
+        ) {
+          await new Promise((r) => setTimeout(r, transientAttempts * 100));
+          continue; // Restart transaction loop cleanly
+        }
+
+        // Definite business failure before commit: mark ABORTED durably
+        try {
+          await TransactionOutcome.updateOne(
+            {
+              businessId: options.businessId,
+              dealershipId: options.dealershipId,
+              operationType: options.operationType,
+              idempotencyKey: options.idempotencyKey,
+            },
+            {
+              $set: {
+                status: "ABORTED",
+                errorMessage: businessErr.message,
+                resolvedAt: new Date(),
+              },
+            }
+          );
+        } catch {
+          // Secondary logging failure
+        }
+
+        throw businessErr;
+      }
+
+      // ─── STAGE 2: COMMIT EXECUTION ──────────────────────────────────
+      let commitConfirmed = false;
+      let commitAttempts = 0;
+
+      while (true) {
+        try {
+          await session.commitTransaction();
+          commitConfirmed = true;
+          break; // Commit confirmed on database!
+        } catch (commitErr: any) {
+          const isUnknownCommit = commitErr?.hasErrorLabel?.(
+            "UnknownTransactionCommitResult"
+          );
+
+          // Retry commit ONLY on UnknownTransactionCommitResult (never re-run business logic!)
+          if (
+            isUnknownCommit &&
+            commitAttempts < maxCommitRetries &&
+            Date.now() < deadline
+          ) {
+            commitAttempts++;
+            await new Promise((r) => setTimeout(r, commitAttempts * 75));
+            continue; // Retry session.commitTransaction() only!
+          }
+
+          if (commitErr?.hasErrorLabel?.("TransientTransactionError")) {
+            if (session.inTransaction()) {
+              try {
+                await session.abortTransaction();
+              } catch {}
+            }
+            if (transientAttempts <= maxTransientRetries && Date.now() < deadline) {
+              await new Promise((r) => setTimeout(r, transientAttempts * 100));
+              break; // Breaks commit loop to restart outer transaction loop
+            }
+            // Transient commit retries exhausted: mark ABORTED and throw
+            try {
+              await TransactionOutcome.updateOne(
+                {
+                  businessId: options.businessId,
+                  dealershipId: options.dealershipId,
+                  operationType: options.operationType,
+                  idempotencyKey: options.idempotencyKey,
+                },
+                {
+                  $set: {
+                    status: "ABORTED",
+                    errorMessage: commitErr.message,
+                    resolvedAt: new Date(),
+                  },
+                }
+              );
+            } catch {}
+            throw commitErr;
+          }
+
+          if (isUnknownCommit) {
+            // UnknownTransactionCommitResult retries exhausted!
+            // Commit is AMBIGUOUS. The primary may have committed.
+            // NEVER mark ABORTED. Preserve RECONCILIATION_REQUIRED.
+            try {
+              await TransactionOutcome.updateOne(
+                {
+                  businessId: options.businessId,
+                  dealershipId: options.dealershipId,
+                  operationType: options.operationType,
+                  idempotencyKey: options.idempotencyKey,
+                },
+                {
+                  $set: {
+                    status: "RECONCILIATION_REQUIRED",
+                    errorMessage: `Commit confirmation lost after ${commitAttempts} retries: ${commitErr.message}`,
+                    recordedAt: new Date(),
+                  },
+                }
+              );
+            } catch {
+              // Secondary logging failure
+            }
+
+            throw new TransactionAmbiguousError(
+              "Transaction commit confirmation lost due to network disconnect. Reconciliation required.",
+              options.idempotencyKey
+            );
+          }
+
+          // Definite commit failure (e.g. WriteConflict, expired session)
+          if (session.inTransaction()) {
+            try {
+              await session.abortTransaction();
+            } catch {}
+          }
+          try {
             await TransactionOutcome.updateOne(
               {
                 businessId: options.businessId,
@@ -110,75 +272,26 @@ export async function withTransaction<T>(
               },
               {
                 $set: {
-                  status: "COMMITTED",
-                  entityId,
-                  responseSnapshot: result,
+                  status: "ABORTED",
+                  errorMessage: commitErr.message,
                   resolvedAt: new Date(),
                 },
               }
             );
-
-            return result;
-          } catch (commitErr: any) {
-            const isUnknownCommit = commitErr?.hasErrorLabel?.("UnknownTransactionCommitResult");
-
-            if (isUnknownCommit && commitAttempts < maxCommitRetries && Date.now() < deadline) {
-              commitAttempts++;
-              await new Promise((r) => setTimeout(r, commitAttempts * 75));
-              continue; // Retry commit ONLY!
-            }
-
-            if (commitErr?.hasErrorLabel?.("TransientTransactionError")) {
-              throw commitErr; // Escalate to outer loop
-            }
-
-            if (isUnknownCommit) {
-              // Ambiguous commit retries exhausted!
-              try {
-                await TransactionOutcome.updateOne(
-                  {
-                    businessId: options.businessId,
-                    dealershipId: options.dealershipId,
-                    operationType: options.operationType,
-                    idempotencyKey: options.idempotencyKey,
-                  },
-                  {
-                    $set: {
-                      status: "RECONCILIATION_REQUIRED",
-                      errorMessage: commitErr.message,
-                      recordedAt: new Date(),
-                    },
-                  }
-                );
-              } catch {
-                // Secondary logging failure
-              }
-
-              throw new TransactionAmbiguousError(
-                "Transaction commit confirmation lost due to network disconnect. Reconciliation required.",
-                options.idempotencyKey
-              );
-            }
-
-            throw commitErr;
-          }
+          } catch {}
+          throw commitErr;
         }
-      } catch (opErr: any) {
-        if (session.inTransaction()) {
-          try {
-            await session.abortTransaction();
-          } catch {
-            // Ignore abort error
-          }
-        }
+      }
 
-        const isTransient = opErr?.hasErrorLabel?.("TransientTransactionError");
-        if (isTransient && transientAttempts <= maxTransientRetries && Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, transientAttempts * 100));
-          continue; // Restart transaction loop
-        }
+      // If transient commit failure broke out to restart transaction:
+      if (!commitConfirmed) {
+        continue;
+      }
 
-        // Mark ABORTED durably
+      // ─── STAGE 3: POST-COMMIT STATUS RECORDING ──────────────────────
+      // Commit has definitely succeeded on the database.
+      // Under NO circumstances may the operation ever be marked ABORTED!
+      try {
         await TransactionOutcome.updateOne(
           {
             businessId: options.businessId,
@@ -188,15 +301,44 @@ export async function withTransaction<T>(
           },
           {
             $set: {
-              status: "ABORTED",
-              errorMessage: opErr.message,
+              status: "COMMITTED",
+              entityId: opEntityId,
+              responseSnapshot: opResult,
               resolvedAt: new Date(),
             },
           }
         );
+      } catch (statusUpdateErr: any) {
+        // Commit succeeded on database, but outcome recording failed!
+        // Mark RECONCILIATION_REQUIRED to prevent any client retry from re-executing business logic.
+        try {
+          await TransactionOutcome.updateOne(
+            {
+              businessId: options.businessId,
+              dealershipId: options.dealershipId,
+              operationType: options.operationType,
+              idempotencyKey: options.idempotencyKey,
+            },
+            {
+              $set: {
+                status: "RECONCILIATION_REQUIRED",
+                errorMessage: `Transaction committed to database, but outcome recording failed: ${statusUpdateErr.message}`,
+                entityId: opEntityId,
+                recordedAt: new Date(),
+              },
+            }
+          );
+        } catch {
+          // Secondary write failure
+        }
 
-        throw opErr;
+        throw new TransactionAmbiguousError(
+          "Transaction committed to database, but recording completion status failed. Reconciliation required.",
+          options.idempotencyKey
+        );
       }
+
+      return opResult;
     }
   } finally {
     await session.endSession();
