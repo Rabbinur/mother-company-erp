@@ -39,5 +39,3 @@ node_modules
 skills-lock.json
 config.bat
 
-.env
-.env.*
