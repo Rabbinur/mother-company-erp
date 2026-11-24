@@ -12,7 +12,10 @@ export type StockMovementType =
   | "correction"
   | "warehouse_transfer_in"
   | "warehouse_transfer_out"
-  | "physical_count_adjustment";
+  | "physical_count_adjustment"
+  | "dispatch_load"
+  | "dispatch_unload"
+  | "undelivered_return";
 
 export interface IStockMovement extends Document {
   movementNumber: string;
@@ -64,6 +67,9 @@ const StockMovementSchema = new Schema<IStockMovement>(
         "warehouse_transfer_in",
         "warehouse_transfer_out",
         "physical_count_adjustment",
+        "dispatch_load",
+        "dispatch_unload",
+        "undelivered_return",
       ],
       index: true,
     },

@@ -35,6 +35,15 @@ export const PERMISSIONS = {
   ORDERS_CANCEL: "orders.cancel",
   ORDERS_RETURN: "orders.return",
 
+  // Delivery & Dispatch
+  DISPATCH_VIEW: "dispatch.view",
+  DISPATCH_CREATE: "dispatch.create",
+  DISPATCH_ASSIGN: "dispatch.assign",
+  DISPATCH_LOAD: "dispatch.load",
+  DISPATCH_DELIVER: "dispatch.deliver",
+  DISPATCH_RETURN: "dispatch.return",
+  DISPATCH_CLOSE: "dispatch.close",
+
   // Financial & Accounting
   PAYMENTS_VIEW: "payments.view",
   PAYMENTS_CREATE: "payments.create",
@@ -165,6 +174,12 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.CUSTOMERS_CREATE,
     PERMISSIONS.ORDERS_VIEW,
     PERMISSIONS.ORDERS_CREATE,
+  ],
+  delivery_staff: [
+    PERMISSIONS.ORDERS_VIEW,
+    PERMISSIONS.DISPATCH_VIEW,
+    PERMISSIONS.DISPATCH_DELIVER,
+    PERMISSIONS.DISPATCH_RETURN,
   ],
 };
 

@@ -41,6 +41,7 @@ export interface IOrder extends Document {
   customerId: mongoose.Types.ObjectId;
   warehouseId: mongoose.Types.ObjectId;
   reservationId?: mongoose.Types.ObjectId;
+  dispatchId?: mongoose.Types.ObjectId;
   items: IOrderItem[];
   subtotal: number;
   discountTotal: number;
@@ -160,6 +161,11 @@ const OrderSchema = new Schema<IOrder>(
     reservationId: {
       type: Schema.Types.ObjectId,
       ref: "StockReservation",
+      index: true,
+    },
+    dispatchId: {
+      type: Schema.Types.ObjectId,
+      ref: "Dispatch",
       index: true,
     },
     items: [OrderItemSchema],

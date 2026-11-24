@@ -37,3 +37,5 @@ export * from "./RateLimit";
 export * from "./GoodsReceiptNote";
 export * from "./SupplierPayable";
 export * from "./Counter";
+export * from "./Vehicle";
+export * from "./Dispatch";

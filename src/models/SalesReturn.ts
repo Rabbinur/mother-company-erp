@@ -14,6 +14,9 @@ export interface ISalesReturnItem {
 
 export interface ISalesReturn extends Document {
   returnNumber: string;
+  businessId?: mongoose.Types.ObjectId;
+  dealershipId?: mongoose.Types.ObjectId;
+  dispatchId?: mongoose.Types.ObjectId;
   orderId: mongoose.Types.ObjectId;
   orderNumber: string;
   customerId: mongoose.Types.ObjectId;
@@ -24,6 +27,9 @@ export interface ISalesReturn extends Document {
   status: "pending" | "approved" | "rejected" | "completed";
   restocked: boolean;
   notes?: string;
+  inspectionNotes?: string;
+  inspectedBy?: mongoose.Types.ObjectId;
+  inspectedAt?: Date;
   createdBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -70,6 +76,21 @@ const SalesReturnSchema = new Schema<ISalesReturn>(
       type: Schema.Types.ObjectId,
       ref: "Order",
       required: true,
+      index: true,
+    },
+    businessId: {
+      type: Schema.Types.ObjectId,
+      ref: "Business",
+      index: true,
+    },
+    dealershipId: {
+      type: Schema.Types.ObjectId,
+      ref: "Dealership",
+      index: true,
+    },
+    dispatchId: {
+      type: Schema.Types.ObjectId,
+      ref: "Dispatch",
       index: true,
     },
     orderNumber: { type: String, required: true, trim: true, index: true },
