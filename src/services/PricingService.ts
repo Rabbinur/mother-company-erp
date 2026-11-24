@@ -140,7 +140,11 @@ export class PricingService {
         productId: pId,
         status: "active",
         effectiveFrom: { $lte: now },
-        $or: [{ effectiveTo: null }, { effectiveTo: { $gte: now } }],
+        $or: [
+          { effectiveTo: null },
+          { effectiveTo: { $gte: now } },
+          { effectiveTo: { $exists: false } },
+        ],
       };
       if (vId) {
         overrideQuery.variantId = vId;

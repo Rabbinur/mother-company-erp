@@ -8,6 +8,7 @@ const JWT_SECRET =
 export interface TokenPayload {
   userId: string;
   businessId?: string;
+  dealershipId?: string;
   activeDealershipId?: string;
   email: string;
   name: string;

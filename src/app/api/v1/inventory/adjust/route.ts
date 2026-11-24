@@ -1,10 +1,8 @@
 import { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db/connect";
-import { Warehouse } from "@/models/Warehouse";
 import { requirePermission } from "@/lib/auth/session";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { InventoryService } from "@/services/InventoryService";
-import { AuditService } from "@/services/AuditService";
 import {
   successResponse,
   errorResponse,
@@ -23,22 +21,53 @@ export async function POST(req: NextRequest) {
   try {
     await connectDB();
     const body = await req.json();
-    const { productId, variantId, adjustmentQty, reason } = body;
+    const {
+      dealershipId,
+      warehouseId,
+      productId,
+      variantId,
+      adjustmentQty,
+      damagedQty,
+      isDamage,
+      reason,
+    } = body;
 
-    if (!productId || !variantId || adjustmentQty === undefined || !reason) {
-      return errorResponse(
-        "Product ID, Variant ID, Adjustment Quantity, and Reason are required",
-        400
-      );
+    const targetDealershipId = dealershipId || user.dealershipId;
+    if (!targetDealershipId || !warehouseId || !productId || !variantId) {
+      return errorResponse("dealershipId, warehouseId, productId, and variantId are required", 400);
     }
 
-    let warehouseId = body.warehouseId;
-    if (!warehouseId) {
-      const central = await Warehouse.findOne({ isCentral: true });
-      warehouseId = central?._id;
+    if (!reason || !reason.trim()) {
+      return errorResponse("Adjustment reason is required for audit trail", 400);
     }
 
-    const updated = await InventoryService.adjustStock({
+    if (isDamage || damagedQty !== undefined) {
+      const qty = Number(damagedQty || adjustmentQty);
+      if (qty <= 0) {
+        return errorResponse("Damaged quantity must be greater than zero", 400);
+      }
+
+      const balance = await InventoryService.recordDamage({
+        businessId: body.businessId || user.businessId,
+        dealershipId: targetDealershipId,
+        warehouseId,
+        productId,
+        variantId,
+        damagedQty: qty,
+        reason,
+        actorId: user.userId,
+      });
+
+      return successResponse(balance, "Damage recorded successfully");
+    }
+
+    if (adjustmentQty === undefined || Number(adjustmentQty) === 0) {
+      return errorResponse("Non-zero adjustmentQty is required", 400);
+    }
+
+    const balance = await InventoryService.adjustStock({
+      businessId: body.businessId || user.businessId,
+      dealershipId: targetDealershipId,
       warehouseId,
       productId,
       variantId,
@@ -47,23 +76,9 @@ export async function POST(req: NextRequest) {
       actorId: user.userId,
     });
 
-    await AuditService.log({
-      actorId: user.userId,
-      actorEmail: user.email,
-      action: "STOCK_ADJUSTMENT",
-      entityType: "inventory",
-      entityId: String(variantId),
-      afterSnapshot: {
-        adjustmentQty,
-        reason,
-        newOnHand: updated.onHandQuantity,
-        newAvailable: updated.availableQuantity,
-      },
-    });
-
-    return successResponse(updated, "Stock adjusted successfully");
+    return successResponse(balance, "Stock adjusted successfully");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Failed to adjust stock";
-    return errorResponse(msg, 500);
+    return errorResponse(msg, 400);
   }
 }

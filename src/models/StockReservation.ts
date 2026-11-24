@@ -8,6 +8,8 @@ export interface IReservationItem {
 
 export interface IStockReservation extends Document {
   reservationNumber: string;
+  businessId?: mongoose.Types.ObjectId;
+  dealershipId?: mongoose.Types.ObjectId;
   idempotencyKey?: string;
   source: "admin_dashboard" | "internal_staff" | "field_sales" | "api";
   orderId?: mongoose.Types.ObjectId;
@@ -49,6 +51,16 @@ const StockReservationSchema = new Schema<IStockReservation>(
       unique: true,
       uppercase: true,
       trim: true,
+      index: true,
+    },
+    businessId: {
+      type: Schema.Types.ObjectId,
+      ref: "Business",
+      index: true,
+    },
+    dealershipId: {
+      type: Schema.Types.ObjectId,
+      ref: "Dealership",
       index: true,
     },
     idempotencyKey: {
@@ -95,6 +107,9 @@ const StockReservationSchema = new Schema<IStockReservation>(
   },
   { timestamps: true }
 );
+
+StockReservationSchema.index({ dealershipId: 1, status: 1 });
+StockReservationSchema.index({ warehouseId: 1, status: 1 });
 
 export const StockReservation: Model<IStockReservation> =
   mongoose.models.StockReservation ||

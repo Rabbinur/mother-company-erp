@@ -9,21 +9,29 @@ export type StockMovementType =
   | "purchase_return"
   | "manual_adjustment"
   | "damage"
-  | "correction";
+  | "correction"
+  | "warehouse_transfer_in"
+  | "warehouse_transfer_out"
+  | "physical_count_adjustment";
 
 export interface IStockMovement extends Document {
   movementNumber: string;
   type: StockMovementType;
+  businessId?: mongoose.Types.ObjectId;
+  dealershipId?: mongoose.Types.ObjectId | null;
   productId: mongoose.Types.ObjectId;
   variantId: mongoose.Types.ObjectId;
   warehouseId: mongoose.Types.ObjectId;
+  batchId?: mongoose.Types.ObjectId;
+  batchNumber?: string;
   quantity: number; // positive or negative
   unitCost?: number;
+  totalCost?: number;
   previousOnHand: number;
   newOnHand: number;
   previousReserved: number;
   newReserved: number;
-  referenceType?: string; // e.g. "purchase", "order", "sales_return", "manual"
+  referenceType?: string; // e.g. "purchase", "order", "transfer", "count"
   referenceId?: string; // e.g. order number, purchase number
   notes?: string;
   createdBy?: mongoose.Types.ObjectId;
@@ -53,7 +61,21 @@ const StockMovementSchema = new Schema<IStockMovement>(
         "manual_adjustment",
         "damage",
         "correction",
+        "warehouse_transfer_in",
+        "warehouse_transfer_out",
+        "physical_count_adjustment",
       ],
+      index: true,
+    },
+    businessId: {
+      type: Schema.Types.ObjectId,
+      ref: "Business",
+      index: true,
+    },
+    dealershipId: {
+      type: Schema.Types.ObjectId,
+      ref: "Dealership",
+      default: null,
       index: true,
     },
     productId: {
@@ -74,8 +96,15 @@ const StockMovementSchema = new Schema<IStockMovement>(
       required: true,
       index: true,
     },
+    batchId: {
+      type: Schema.Types.ObjectId,
+      ref: "StockBatch",
+      index: true,
+    },
+    batchNumber: { type: String, trim: true },
     quantity: { type: Number, required: true },
     unitCost: { type: Number },
+    totalCost: { type: Number },
     previousOnHand: { type: Number, required: true },
     newOnHand: { type: Number, required: true },
     previousReserved: { type: Number, required: true },
@@ -89,6 +118,8 @@ const StockMovementSchema = new Schema<IStockMovement>(
 );
 
 StockMovementSchema.index({ createdAt: -1 });
+StockMovementSchema.index({ dealershipId: 1, createdAt: -1 });
+StockMovementSchema.index({ businessId: 1, dealershipId: 1, warehouseId: 1 });
 
 export const StockMovement: Model<IStockMovement> =
   mongoose.models.StockMovement ||

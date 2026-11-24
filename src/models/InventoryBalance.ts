@@ -1,6 +1,8 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 
 export interface IInventoryBalance extends Document {
+  businessId: mongoose.Types.ObjectId;
+  dealershipId?: mongoose.Types.ObjectId | null;
   warehouseId: mongoose.Types.ObjectId;
   productId: mongoose.Types.ObjectId;
   variantId: mongoose.Types.ObjectId;
@@ -9,6 +11,7 @@ export interface IInventoryBalance extends Document {
   availableQuantity: number;
   damagedQuantity: number;
   stockInTransit: number;
+  quarantineReason?: string;
   lastUpdated: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -16,6 +19,18 @@ export interface IInventoryBalance extends Document {
 
 const InventoryBalanceSchema = new Schema<IInventoryBalance>(
   {
+    businessId: {
+      type: Schema.Types.ObjectId,
+      ref: "Business",
+      required: true,
+      index: true,
+    },
+    dealershipId: {
+      type: Schema.Types.ObjectId,
+      ref: "Dealership",
+      default: null,
+      index: true,
+    },
     warehouseId: {
       type: Schema.Types.ObjectId,
       ref: "Warehouse",
@@ -39,16 +54,43 @@ const InventoryBalanceSchema = new Schema<IInventoryBalance>(
     availableQuantity: { type: Number, default: 0 },
     damagedQuantity: { type: Number, default: 0, min: 0 },
     stockInTransit: { type: Number, default: 0, min: 0 },
+    quarantineReason: { type: String, trim: true },
     lastUpdated: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
 
-// Compound unique index so each variant in a warehouse has one balance record
+// Active dealership inventory balance compound index
 InventoryBalanceSchema.index(
-  { warehouseId: 1, productId: 1, variantId: 1 },
-  { unique: true }
+  {
+    businessId: 1,
+    dealershipId: 1,
+    warehouseId: 1,
+    productId: 1,
+    variantId: 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: { dealershipId: { $type: "objectId" } },
+  }
 );
+
+// Quarantined inventory balance compound index
+InventoryBalanceSchema.index(
+  {
+    businessId: 1,
+    warehouseId: 1,
+    productId: 1,
+    variantId: 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: { dealershipId: null },
+  }
+);
+
+InventoryBalanceSchema.index({ dealershipId: 1, productId: 1, variantId: 1 });
+InventoryBalanceSchema.index({ warehouseId: 1, productId: 1 });
 
 export const InventoryBalance: Model<IInventoryBalance> =
   mongoose.models.InventoryBalance ||

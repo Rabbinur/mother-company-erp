@@ -9,6 +9,8 @@ export interface IBusiness extends Document {
   contactPhone?: string;
   contactEmail?: string;
   address?: string;
+  inventoryCostingMethod?: "fifo" | "weighted_average" | "specific_batch";
+  freeGoodsCostPolicy?: "absorb_into_unit_cost" | "separate_zero_cost_batch";
   isDeleted: boolean;
   deletedAt?: Date;
   deletedBy?: mongoose.Types.ObjectId;
@@ -43,6 +45,16 @@ const BusinessSchema = new Schema<IBusiness>(
     contactPhone: { type: String, trim: true },
     contactEmail: { type: String, trim: true, lowercase: true },
     address: { type: String, trim: true },
+    inventoryCostingMethod: {
+      type: String,
+      enum: ["fifo", "weighted_average", "specific_batch"],
+      default: "fifo",
+    },
+    freeGoodsCostPolicy: {
+      type: String,
+      enum: ["absorb_into_unit_cost", "separate_zero_cost_batch"],
+      default: "absorb_into_unit_cost",
+    },
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date },
     deletedBy: { type: Schema.Types.ObjectId, ref: "User" },

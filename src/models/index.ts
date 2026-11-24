@@ -9,6 +9,7 @@ export * from "./PriceHistory";
 export * from "./Vendor";
 export * from "./Purchase";
 export * from "./InventoryBalance";
+export * from "./StockBatch";
 export * from "./StockMovement";
 export * from "./StockReservation";
 export * from "./Customer";

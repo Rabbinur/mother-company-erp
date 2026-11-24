@@ -38,7 +38,13 @@ export async function POST(req: NextRequest) {
       warehouseId = central?._id;
     }
 
+    if (!warehouseId) {
+      return errorResponse("Warehouse ID is required", 400);
+    }
+
     const updated = await InventoryService.recordDamage({
+      businessId: body.businessId || user.businessId,
+      dealershipId: body.dealershipId || user.dealershipId,
       warehouseId,
       productId,
       variantId,
