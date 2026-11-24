@@ -1,57 +1,18 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { Network, Plus, Search, AlertCircle, CheckCircle2 } from "lucide-react";
 import {
-  Network,
-  Plus,
-  Search,
-  Edit2,
-  Trash2,
-  AlertCircle,
-  CheckCircle2,
-  Shield,
-  Star,
-  User,
-  X,
-} from "lucide-react";
-import { formatShortDate } from "@/lib/utils";
-
-interface DealershipMembershipItem {
-  _id: string;
-  businessId: string;
-  dealershipId: { _id: string; name: string; code: string } | string;
-  userId: { _id: string; name: string; email: string } | string;
-  role: string;
-  isPrimary: boolean;
-  status: "active" | "suspended" | "inactive";
-  employeeId?: string;
-  designation?: string;
-  department?: string;
-  createdAt: string;
-}
-
-interface UserOption {
-  _id: string;
-  name: string;
-  email: string;
-}
-
-interface DealershipOption {
-  _id: string;
-  name: string;
-  code: string;
-}
-
-const ROLES = [
-  { value: "owner", label: "Owner" },
-  { value: "admin", label: "Admin" },
-  { value: "manager", label: "General Manager" },
-  { value: "accountant", label: "Accountant / Finance" },
-  { value: "warehouse_manager", label: "Warehouse Manager" },
-  { value: "cashier", label: "Cashier" },
-  { value: "sales_rep", label: "Sales Representative" },
-  { value: "staff", label: "General Staff" },
-];
+  MembershipTable,
+  type DealershipMembershipItem,
+} from "@/components/dealership-memberships/MembershipTable";
+import {
+  MembershipModal,
+  type MembershipFormData,
+  type UserOption,
+  type DealershipOption,
+  ROLES,
+} from "@/components/dealership-memberships/MembershipModal";
 
 export default function DealershipMembershipsPage() {
   const [memberships, setMemberships] = useState<DealershipMembershipItem[]>([]);
@@ -68,18 +29,8 @@ export default function DealershipMembershipsPage() {
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedMembership, setSelectedMembership] = useState<DealershipMembershipItem | null>(null);
   const [saving, setSaving] = useState(false);
-
-  // Form fields
-  const [selectedUserId, setSelectedUserId] = useState("");
-  const [selectedDealershipId, setSelectedDealershipId] = useState("");
-  const [role, setRole] = useState("sales_rep");
-  const [isPrimary, setIsPrimary] = useState(false);
-  const [status, setStatus] = useState<"active" | "suspended" | "inactive">("active");
-  const [employeeId, setEmployeeId] = useState("");
-  const [designation, setDesignation] = useState("");
-  const [department, setDepartment] = useState("");
 
   useEffect(() => {
     fetchAuxiliaryData();
@@ -125,68 +76,26 @@ export default function DealershipMembershipsPage() {
     }
   };
 
-  const openCreateModal = () => {
+  const handleOpenCreate = () => {
     setIsEditing(false);
-    setSelectedId(null);
-    setSelectedUserId(users[0]?._id || "");
-    setSelectedDealershipId(dealerships[0]?._id || "");
-    setRole("sales_rep");
-    setIsPrimary(false);
-    setStatus("active");
-    setEmployeeId("");
-    setDesignation("");
-    setDepartment("");
+    setSelectedMembership(null);
     setModalOpen(true);
   };
 
-  const openEditModal = (m: DealershipMembershipItem) => {
+  const handleOpenEdit = (m: DealershipMembershipItem) => {
     setIsEditing(true);
-    setSelectedId(m._id);
-    const uId = typeof m.userId === "object" && m.userId ? m.userId._id : (m.userId as string);
-    const dId =
-      typeof m.dealershipId === "object" && m.dealershipId
-        ? m.dealershipId._id
-        : (m.dealershipId as string);
-    setSelectedUserId(uId);
-    setSelectedDealershipId(dId);
-    setRole(m.role);
-    setIsPrimary(m.isPrimary);
-    setStatus(m.status);
-    setEmployeeId(m.employeeId || "");
-    setDesignation(m.designation || "");
-    setDepartment(m.department || "");
+    setSelectedMembership(m);
     setModalOpen(true);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (payload: MembershipFormData) => {
     try {
       setSaving(true);
       setError(null);
       setSuccess(null);
 
-      const payload = isEditing
-        ? {
-            role,
-            isPrimary,
-            status,
-            employeeId: employeeId || undefined,
-            designation: designation || undefined,
-            department: department || undefined,
-          }
-        : {
-            userId: selectedUserId,
-            dealershipId: selectedDealershipId,
-            role,
-            isPrimary,
-            status,
-            employeeId: employeeId || undefined,
-            designation: designation || undefined,
-            department: department || undefined,
-          };
-
-      const url = isEditing
-        ? `/api/v1/dealership-memberships/${selectedId}`
+      const url = isEditing && selectedMembership
+        ? `/api/v1/dealership-memberships/${selectedMembership._id}`
         : "/api/v1/dealership-memberships";
       const method = isEditing ? "PUT" : "POST";
 
@@ -235,7 +144,7 @@ export default function DealershipMembershipsPage() {
     }
   };
 
-  // Client side search filter over joined user / dealership names
+  // Client search filtering
   const filteredMemberships = memberships.filter((m) => {
     if (!search) return true;
     const s = search.toLowerCase();
@@ -265,7 +174,7 @@ export default function DealershipMembershipsPage() {
           </p>
         </div>
         <button
-          onClick={openCreateModal}
+          onClick={handleOpenCreate}
           className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary/90 focus:outline-none"
         >
           <Plus className="h-4 w-4" />
@@ -337,308 +246,25 @@ export default function DealershipMembershipsPage() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-          <thead className="bg-slate-50 dark:bg-slate-800/60">
-            <tr>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Staff Member
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Assigned Dealership
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Branch Role & Scope
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Employee Details
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Status
-              </th>
-              <th className="px-6 py-3.5 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-sm">
-            {loading ? (
-              <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
-                  <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                  <p className="mt-2 text-xs">Loading staff memberships...</p>
-                </td>
-              </tr>
-            ) : filteredMemberships.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
-                  No dealership staff memberships found.
-                </td>
-              </tr>
-            ) : (
-              filteredMemberships.map((m) => {
-                const userName =
-                  typeof m.userId === "object" && m.userId ? m.userId.name : "Unknown User";
-                const userEmail =
-                  typeof m.userId === "object" && m.userId ? m.userId.email : "";
-                const dealershipName =
-                  typeof m.dealershipId === "object" && m.dealershipId
-                    ? m.dealershipId.name
-                    : "Unknown Dealership";
-                const dealershipCode =
-                  typeof m.dealershipId === "object" && m.dealershipId
-                    ? m.dealershipId.code
-                    : "";
+      {/* Table Component */}
+      <MembershipTable
+        memberships={filteredMemberships}
+        loading={loading}
+        onEdit={handleOpenEdit}
+        onDelete={handleDelete}
+      />
 
-                return (
-                  <tr key={m._id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-slate-900 dark:text-white flex items-center gap-1.5">
-                        <User className="h-4 w-4 text-slate-400" />
-                        {userName}
-                      </div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{userEmail}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-slate-900 dark:text-white">
-                        {dealershipName}
-                      </div>
-                      <div className="text-xs text-slate-500">Code: {dealershipCode}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1.5">
-                        <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200">
-                          <Shield className="h-3 w-3 text-primary" />
-                          {m.role.toUpperCase()}
-                        </span>
-                        {m.isPrimary && (
-                          <span
-                            className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-                            title="Primary Dealership for this staff member"
-                          >
-                            <Star className="h-3 w-3 fill-amber-500 text-amber-500" />
-                            Primary
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-slate-700 dark:text-slate-300">
-                      <div className="text-xs font-medium">
-                        {m.designation || m.department ? `${m.designation || ""} ${m.department ? `(${m.department})` : ""}` : "—"}
-                      </div>
-                      {m.employeeId && (
-                        <div className="text-xs text-slate-400">ID: {m.employeeId}</div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          m.status === "active"
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                            : m.status === "suspended"
-                            ? "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300"
-                            : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400"
-                        }`}
-                      >
-                        {m.status.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => openEditModal(m)}
-                          className="rounded p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                          title="Edit Staff Assignment"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(m._id)}
-                          className="rounded p-1 text-red-400 hover:text-red-600"
-                          title="Revoke Staff Assignment"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900">
-            <div className="flex items-center justify-between border-b pb-3 dark:border-slate-800">
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-                {isEditing ? "Edit Dealership Staff Assignment" : "Assign Staff to Dealership"}
-              </h3>
-              <button
-                onClick={() => setModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSave} className="mt-4 space-y-4">
-              {!isEditing && (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      Staff User Account *
-                    </label>
-                    <select
-                      required
-                      value={selectedUserId}
-                      onChange={(e) => setSelectedUserId(e.target.value)}
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                    >
-                      {users.map((u) => (
-                        <option key={u._id} value={u._id}>
-                          {u.name} ({u.email})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      Dealership *
-                    </label>
-                    <select
-                      required
-                      value={selectedDealershipId}
-                      onChange={(e) => setSelectedDealershipId(e.target.value)}
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                    >
-                      {dealerships.map((d) => (
-                        <option key={d._id} value={d._id}>
-                          {d.name} ({d.code})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Dealership Role *
-                  </label>
-                  <select
-                    value={role}
-                    onChange={(e) => setRole(e.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  >
-                    {ROLES.map((r) => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Status
-                  </label>
-                  <select
-                    value={status}
-                    onChange={(e) =>
-                      setStatus(e.target.value as "active" | "suspended" | "inactive")
-                    }
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  >
-                    <option value="active">Active</option>
-                    <option value="suspended">Suspended</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="flex items-center gap-2 cursor-pointer p-2 rounded bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={isPrimary}
-                    onChange={(e) => setIsPrimary(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-primary"
-                  />
-                  <div>
-                    <span className="text-xs font-medium text-slate-900 dark:text-white">
-                      Set as Primary Dealership
-                    </span>
-                    <p className="text-[11px] text-slate-500">
-                      When enabled, this branch will be the default working outlet for this staff member.
-                    </p>
-                  </div>
-                </label>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Employee ID
-                  </label>
-                  <input
-                    type="text"
-                    value={employeeId}
-                    onChange={(e) => setEmployeeId(e.target.value)}
-                    placeholder="EMP-1001"
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Designation
-                  </label>
-                  <input
-                    type="text"
-                    value={designation}
-                    onChange={(e) => setDesignation(e.target.value)}
-                    placeholder="Sr. Sales Rep"
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Department
-                  </label>
-                  <input
-                    type="text"
-                    value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                    placeholder="Commercial"
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {saving ? "Saving..." : isEditing ? "Save Changes" : "Assign Staff"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Modal Component */}
+      <MembershipModal
+        isOpen={modalOpen}
+        isEditing={isEditing}
+        initialData={selectedMembership}
+        users={users}
+        dealerships={dealerships}
+        saving={saving}
+        onClose={() => setModalOpen(false)}
+        onSave={handleSave}
+      />
     </div>
   );
 }
