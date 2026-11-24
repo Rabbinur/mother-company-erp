@@ -34,3 +34,4 @@ export * from "./CustomerDealershipAccount";
 export * from "./SupportTicket";
 export * from "./TransactionOutcome";
 export * from "./RateLimit";
+export * from "./GoodsReceiptNote";

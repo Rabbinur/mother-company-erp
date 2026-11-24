@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { ArrowRightLeft, SlidersHorizontal, Search } from "lucide-react";
+import Link from "next/link";
+import { ArrowRightLeft, SlidersHorizontal, Search, FileCheck2 } from "lucide-react";
 
 interface OptionItem {
   _id: string;
@@ -47,6 +48,13 @@ export function InventoryHeader({
         </div>
 
         <div className="flex items-center gap-2">
+          <Link
+            href="/inventory/grn"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors"
+          >
+            <FileCheck2 className="h-3.5 w-3.5 text-slate-500" />
+            <span>Challan / GRN Receiving</span>
+          </Link>
           <button
             type="button"
             onClick={onOpenTransfer}
