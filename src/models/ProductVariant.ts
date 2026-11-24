@@ -6,6 +6,7 @@ export interface IVariantAttribute {
 }
 
 export interface IProductVariant extends Document {
+  businessId?: mongoose.Types.ObjectId;
   productId: mongoose.Types.ObjectId;
   variantName: string; // e.g. "XL / Navy Blue" or "Default"
   sku: string;
@@ -22,6 +23,12 @@ export interface IProductVariant extends Document {
 
 const ProductVariantSchema = new Schema<IProductVariant>(
   {
+    businessId: {
+      type: Schema.Types.ObjectId,
+      ref: "Business",
+      required: false,
+      index: true,
+    },
     productId: {
       type: Schema.Types.ObjectId,
       ref: "Product",
@@ -32,7 +39,6 @@ const ProductVariantSchema = new Schema<IProductVariant>(
     sku: {
       type: String,
       required: true,
-      unique: true,
       uppercase: true,
       trim: true,
       index: true,
@@ -57,6 +63,9 @@ const ProductVariantSchema = new Schema<IProductVariant>(
   },
   { timestamps: true }
 );
+
+ProductVariantSchema.index({ productId: 1, sku: 1 });
+ProductVariantSchema.index({ businessId: 1, sku: 1 });
 
 export const ProductVariant: Model<IProductVariant> =
   mongoose.models.ProductVariant ||

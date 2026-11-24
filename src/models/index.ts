@@ -27,6 +27,8 @@ export * from "./Business";
 export * from "./PrincipalCompany";
 export * from "./Dealership";
 export * from "./DealershipMembership";
+export * from "./DealershipProduct";
+export * from "./DealershipPrice";
 export * from "./CustomerDealershipAccount";
 export * from "./SupportTicket";
 export * from "./TransactionOutcome";
