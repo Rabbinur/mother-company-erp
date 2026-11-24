@@ -36,3 +36,4 @@ export * from "./TransactionOutcome";
 export * from "./RateLimit";
 export * from "./GoodsReceiptNote";
 export * from "./SupplierPayable";
+export * from "./Counter";

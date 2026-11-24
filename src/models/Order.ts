@@ -6,16 +6,37 @@ export interface IOrderItem {
   name: string;
   sku: string;
   quantity: number;
-  customerPriceSnapshot: number; // authoritative price charged
-  retailPriceSnapshot: number; // suggested resale price (informational)
+  customerPriceSnapshot: number; // authoritative price charged to retailer
+  retailPriceSnapshot: number; // suggested resale price (MSRP/informational)
+  unitPrice?: number; // alias for customerPriceSnapshot
   discount: number;
   subtotal: number;
+  priceEffectiveDate?: Date;
+  priceSource?: "dealership_override" | "catalog_base";
 }
+
+export type SalesOrderStatus =
+  | "draft"
+  | "confirmed"
+  | "processing"
+  | "partially_fulfilled"
+  | "fulfilled"
+  | "delivered"
+  | "cancelled"
+  | "returned"
+  | "DRAFT"
+  | "CONFIRMED"
+  | "PARTIALLY_FULFILLED"
+  | "FULFILLED"
+  | "CANCELLED";
 
 export interface IOrder extends Document {
   orderNumber: string;
   externalOrderId?: string;
   idempotencyKey?: string;
+  businessId?: mongoose.Types.ObjectId;
+  dealershipId?: mongoose.Types.ObjectId;
+  customerDealershipAccountId?: mongoose.Types.ObjectId;
   source: "admin_dashboard" | "internal_staff" | "field_sales" | "api";
   customerId: mongoose.Types.ObjectId;
   warehouseId: mongoose.Types.ObjectId;
@@ -25,16 +46,10 @@ export interface IOrder extends Document {
   discountTotal: number;
   taxTotal: number;
   grandTotal: number;
+  totalAmount?: number;
   paidAmount: number;
   receivableAmount: number;
-  orderStatus:
-    | "draft"
-    | "confirmed"
-    | "processing"
-    | "fulfilled"
-    | "delivered"
-    | "cancelled"
-    | "returned";
+  orderStatus: SalesOrderStatus;
   fulfillmentStatus:
     | "unfulfilled"
     | "partially_fulfilled"
@@ -45,6 +60,9 @@ export interface IOrder extends Document {
   confirmedDate?: Date;
   fulfilledDate?: Date;
   cancelledDate?: Date;
+  cancellationReason?: string;
+  cancelledBy?: mongoose.Types.ObjectId;
+  confirmedBy?: mongoose.Types.ObjectId;
   salesmanId?: mongoose.Types.ObjectId;
   notes?: string;
   createdBy?: mongoose.Types.ObjectId;
@@ -58,19 +76,28 @@ const OrderItemSchema = new Schema<IOrderItem>(
       type: Schema.Types.ObjectId,
       ref: "Product",
       required: true,
+      index: true,
     },
     variantId: {
       type: Schema.Types.ObjectId,
       ref: "ProductVariant",
       required: true,
+      index: true,
     },
     name: { type: String, required: true },
     sku: { type: String, required: true },
     quantity: { type: Number, required: true, min: 1 },
     customerPriceSnapshot: { type: Number, required: true, min: 0 },
     retailPriceSnapshot: { type: Number, required: true, min: 0 },
+    unitPrice: { type: Number, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
     subtotal: { type: Number, required: true, min: 0 },
+    priceEffectiveDate: { type: Date },
+    priceSource: {
+      type: String,
+      enum: ["dealership_override", "catalog_base"],
+      default: "catalog_base",
+    },
   },
   { _id: false }
 );
@@ -95,6 +122,21 @@ const OrderSchema = new Schema<IOrder>(
       type: String,
       trim: true,
       sparse: true,
+      index: true,
+    },
+    businessId: {
+      type: Schema.Types.ObjectId,
+      ref: "Business",
+      index: true,
+    },
+    dealershipId: {
+      type: Schema.Types.ObjectId,
+      ref: "Dealership",
+      index: true,
+    },
+    customerDealershipAccountId: {
+      type: Schema.Types.ObjectId,
+      ref: "CustomerDealershipAccount",
       index: true,
     },
     source: {
@@ -133,12 +175,18 @@ const OrderSchema = new Schema<IOrder>(
         "draft",
         "confirmed",
         "processing",
+        "partially_fulfilled",
         "fulfilled",
         "delivered",
         "cancelled",
         "returned",
+        "DRAFT",
+        "CONFIRMED",
+        "PARTIALLY_FULFILLED",
+        "FULFILLED",
+        "CANCELLED",
       ],
-      default: "draft",
+      default: "DRAFT",
       index: true,
     },
     fulfillmentStatus: {
@@ -157,6 +205,9 @@ const OrderSchema = new Schema<IOrder>(
     confirmedDate: { type: Date },
     fulfilledDate: { type: Date },
     cancelledDate: { type: Date },
+    cancellationReason: { type: String, trim: true },
+    cancelledBy: { type: Schema.Types.ObjectId, ref: "User" },
+    confirmedBy: { type: Schema.Types.ObjectId, ref: "User" },
     salesmanId: { type: Schema.Types.ObjectId, ref: "User" },
     notes: { type: String, trim: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
@@ -164,5 +215,18 @@ const OrderSchema = new Schema<IOrder>(
   { timestamps: true }
 );
 
+// High-speed compound query indexes
+OrderSchema.index({ businessId: 1, dealershipId: 1, orderStatus: 1, createdAt: -1 });
+OrderSchema.index({ businessId: 1, customerId: 1, createdAt: -1 });
+OrderSchema.index({ businessId: 1, orderNumber: 1 });
+
+OrderSchema.virtual("totalAmount").get(function (this: IOrder) {
+  return this.grandTotal;
+});
+
 export const Order: Model<IOrder> =
   mongoose.models.Order || mongoose.model<IOrder>("Order", OrderSchema);
+
+export const SalesOrder = Order;
+export type ISalesOrder = IOrder;
+export type ISalesOrderItem = IOrderItem;
