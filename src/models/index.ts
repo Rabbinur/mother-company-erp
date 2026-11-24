@@ -35,3 +35,4 @@ export * from "./SupportTicket";
 export * from "./TransactionOutcome";
 export * from "./RateLimit";
 export * from "./GoodsReceiptNote";
+export * from "./SupplierPayable";

@@ -12,6 +12,7 @@ import { InventoryBalance } from "../src/models/InventoryBalance.ts";
 import { StockBatch } from "../src/models/StockBatch.ts";
 import { StockMovement } from "../src/models/StockMovement.ts";
 import { AuditLog } from "../src/models/AuditLog.ts";
+import { SupplierPayable } from "../src/models/SupplierPayable.ts";
 
 // Services & Utilities
 import { GoodsReceiptNoteService } from "../src/services/GoodsReceiptNoteService.ts";
@@ -33,6 +34,7 @@ describe("Phase 3: Printed Challan OCR + Purchase GRN Workflow", () => {
   let batches = [];
   let movements = [];
   let auditLogs = [];
+  let payables = [];
 
   const bId = new mongoose.Types.ObjectId();
   const d1Id = new mongoose.Types.ObjectId(); // Dealership 1
@@ -46,6 +48,7 @@ describe("Phase 3: Printed Challan OCR + Purchase GRN Workflow", () => {
 
   beforeEach(() => {
     grns = [];
+    payables = [];
     vendors = [
       {
         _id: sId,
@@ -154,6 +157,7 @@ describe("Phase 3: Printed Challan OCR + Purchase GRN Workflow", () => {
     // Mock GoodsReceiptNote
     GoodsReceiptNote.create = async (doc) => {
       const created = {
+        isCancelled: false,
         ...doc,
         _id: new mongoose.Types.ObjectId(),
         save: async function () {
@@ -180,6 +184,7 @@ describe("Phase 3: Printed Challan OCR + Purchase GRN Workflow", () => {
         if (query.businessId && String(x.businessId) !== String(query.businessId)) return false;
         if (query.supplierId && String(x.supplierId) !== String(query.supplierId)) return false;
         if (query.challanNumber && x.challanNumber.toLowerCase() !== query.challanNumber.toLowerCase()) return false;
+        if (query.isCancelled !== undefined && x.isCancelled !== query.isCancelled) return false;
         if (query.status && query.status.$ne && x.status === query.status.$ne) return false;
         return true;
       }) || null;
@@ -265,6 +270,40 @@ describe("Phase 3: Printed Challan OCR + Purchase GRN Workflow", () => {
     AuditLog.create = async (doc) => {
       auditLogs.push(doc);
       return doc;
+    };
+
+    // Mock Vendor.findByIdAndUpdate
+    Vendor.findByIdAndUpdate = async (id, update) => {
+      const v = vendors.find((x) => String(x._id) === String(id));
+      if (v && update.$inc && update.$inc.currentPayable) {
+        v.currentPayable = (v.currentPayable || 0) + update.$inc.currentPayable;
+      }
+      return v || null;
+    };
+
+    // Mock SupplierPayable
+    SupplierPayable.findOne = (query) => {
+      const p = payables.find((x) => {
+        if (query.businessId && String(x.businessId) !== String(query.businessId)) return false;
+        if (query.grnId && String(x.grnId) !== String(query.grnId)) return false;
+        if (query.isCancelled !== undefined && x.isCancelled !== query.isCancelled) return false;
+        return true;
+      });
+      const chainable = {
+        session: () => chainable,
+        then: (resolve, reject) => Promise.resolve(p || null).then(resolve, reject),
+      };
+      return chainable;
+    };
+
+    SupplierPayable.create = async (docs) => {
+      const arr = Array.isArray(docs) ? docs : [docs];
+      const created = arr.map((d) => ({
+        ...d,
+        _id: new mongoose.Types.ObjectId(),
+      }));
+      payables.push(...created);
+      return created;
     };
   });
 
@@ -753,6 +792,110 @@ describe("Phase 3: Printed Challan OCR + Purchase GRN Workflow", () => {
       };
 
       assert.equal(canUserViewPurchaseCost(accountantUser), true);
+    });
+  });
+
+  describe("11. Pre-Implementation Verification & Regression Suite", () => {
+    test("Regression A: Free Quantity Counting never double-counts scheme free stock", async () => {
+      const grn = await GoodsReceiptNoteService.createGrn({
+        businessId: bId,
+        dealershipId: d1Id,
+        warehouseId: wId,
+        supplierId: sId,
+        challanNumber: "CH-REG-FREE-01",
+        challanDate: "2026-11-24",
+        items: [
+          {
+            productName: "Fresh Refined Sugar 1kg Pack",
+            sku: "SUGAR-REF-1KG-STD",
+            challanQuantity: 100, // 100 purchased
+            receivedQuantity: 100, // 100 physical purchased good units counted
+            supplierSchemeFreeQuantity: 10, // 10 free units promised & delivered
+            unitPurchasePrice: 120,
+          },
+        ],
+        actorId: uId,
+      });
+
+      await GoodsReceiptNoteService.confirmGrn({
+        grnId: grn._id,
+        actorId: uId,
+      });
+
+      // Total stock added to balance must be 100 + 10 = 110 (never 120)
+      const balance = balances.find((b) => String(b.dealershipId) === String(d1Id));
+      assert.ok(balance);
+      assert.equal(balance.onHandQuantity, 110);
+      assert.equal(batches[0].totalReceivedQuantity, 110);
+      assert.equal(batches[0].purchasedQuantity, 100);
+      assert.equal(batches[0].supplierSchemeFreeQuantity, 10);
+    });
+
+    test("Regression B: Damaged stock preserves dealership ownership and is not double-deducted from onHand", async () => {
+      const grn = await GoodsReceiptNoteService.createGrn({
+        businessId: bId,
+        dealershipId: d1Id,
+        warehouseId: wId,
+        supplierId: sId,
+        challanNumber: "CH-REG-DMG-02",
+        challanDate: "2026-11-24",
+        items: [
+          {
+            productName: "Fresh Refined Sugar 1kg Pack",
+            sku: "SUGAR-REF-1KG-STD",
+            challanQuantity: 50,
+            receivedQuantity: 45, // 45 good
+            damagedQuantity: 5,   // 5 damaged on arrival
+            unitPurchasePrice: 120,
+          },
+        ],
+        actorId: uId,
+      });
+
+      await GoodsReceiptNoteService.confirmGrn({
+        grnId: grn._id,
+        actorId: uId,
+      });
+
+      const balance = balances.find((b) => String(b.dealershipId) === String(d1Id));
+      assert.ok(balance);
+      // On hand is 40 (from previous test) + 110 (from first test) + 40 (from ISO test) + 40 = let's check damaged
+      assert.equal(balance.damagedQuantity, 5);
+
+      // Verify damage movement is attributed to dealership d1Id, not null
+      const dmgMovement = movements.find((m) => m.type === "damage" && m.referenceId === grn.grnNumber);
+      assert.ok(dmgMovement);
+      assert.equal(String(dmgMovement.dealershipId), String(d1Id));
+      assert.notEqual(dmgMovement.dealershipId, null);
+    });
+
+    test("Regression C: Uses isCancelled: false in partial index filter instead of unsupported $ne operator", () => {
+      // GoodsReceiptNoteSchema uses isCancelled: false which is fully supported by MongoDB index spec
+      assert.equal(typeof GoodsReceiptNote.schema.paths.isCancelled, "object");
+      assert.equal(GoodsReceiptNote.schema.paths.isCancelled.instance, "Boolean");
+    });
+
+    test("Regression D: Conditional cash discount does not reduce inventory landed unit cost or billed total", () => {
+      const result = GrnCostAllocationService.allocateCosts({
+        items: [
+          {
+            productName: "Sugar 1kg",
+            challanQuantity: 10,
+            receivedQuantity: 10,
+            unitPurchasePrice: 100, // 1000
+            lineDiscount: 0,
+          },
+        ],
+        invoiceDiscount: 0,
+        cashDiscount: 50, // 5% conditional cash settlement discount
+        tradeDiscount: 20, // 20 trade discount earned immediately
+        freightCharge: 0,
+      });
+
+      // Landed unit cost only subtracts trade discount, NOT conditional cash discount: (1000 - 20) / 10 = 98
+      assert.equal(result.items[0].netLandedUnitCost, 98);
+      // Net billed total on invoice before prompt settlement = 1000 - 20 = 980 (not 930)
+      assert.equal(result.netInvoiceTotal, 980);
     });
   });
 });

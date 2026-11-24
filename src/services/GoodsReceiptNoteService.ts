@@ -3,11 +3,14 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { GoodsReceiptNote, type IGoodsReceiptNote, type IGRNItem, type GRNStatus } from "@/models/GoodsReceiptNote";
+import { SupplierPayable } from "@/models/SupplierPayable";
 import { Vendor } from "@/models/Vendor";
 import { Warehouse } from "@/models/Warehouse";
 import { Dealership } from "@/models/Dealership";
 import { AuditLog } from "@/models/AuditLog";
+import { StockMovement } from "@/models/StockMovement";
 import { InventoryService } from "./InventoryService";
+import { PurchaseOrderService } from "./PurchaseOrderService";
 import { ProductMatcherService } from "./ProductMatcherService";
 import { GrnCostAllocationService } from "./GrnCostAllocationService";
 import { OcrService } from "@/lib/ocr/OcrService";
@@ -82,7 +85,7 @@ export class GoodsReceiptNoteService {
       businessId: bId,
       supplierId: sId,
       challanNumber: cleanChallan,
-      status: { $ne: "CANCELLED" },
+      isCancelled: false,
     });
     if (existing) {
       throw new Error(
@@ -576,19 +579,109 @@ export class GoodsReceiptNoteService {
       });
     }
 
-    // Record damage write-offs/quarantine for damaged units
+    // Record damaged units directly under the originating dealership's balance and ledger
     for (const d of damagedItems) {
-      await InventoryService.recordDamage({
-        businessId: updated.businessId,
-        dealershipId: updated.dealershipId,
-        warehouseId: updated.warehouseId,
-        productId: d.productId,
-        variantId: d.variantId,
-        damagedQty: d.damagedQty,
-        reason: `Damaged in transit / on arrival under GRN ${updated.grnNumber}`,
-        actorId: actId,
-        session: params.session,
-      });
+      const balance = await InventoryService.getOrCreateBalance(
+        updated.businessId,
+        updated.dealershipId,
+        updated.warehouseId,
+        d.productId,
+        d.variantId,
+        params.session
+      );
+      balance.damagedQuantity = (balance.damagedQuantity || 0) + d.damagedQty;
+      balance.lastUpdated = new Date();
+      await balance.save({ session: params.session });
+
+      const moveCode = generateReferenceCode("STK-DMG", Math.floor(Math.random() * 9000 + 1000));
+      await StockMovement.create(
+        [
+          {
+            movementNumber: moveCode,
+            type: "damage",
+            businessId: updated.businessId,
+            dealershipId: updated.dealershipId,
+            warehouseId: updated.warehouseId,
+            productId: d.productId,
+            variantId: d.variantId,
+            quantity: d.damagedQty,
+            unitCost: 0,
+            totalCost: 0,
+            previousOnHand: balance.onHandQuantity,
+            newOnHand: balance.onHandQuantity,
+            previousReserved: balance.reservedQuantity,
+            newReserved: balance.reservedQuantity,
+            referenceType: "grn_receipt_damage",
+            referenceId: updated.grnNumber,
+            notes: `Damaged in transit / on arrival under GRN ${updated.grnNumber}`,
+            createdBy: actId,
+          } as any,
+        ],
+        { session: params.session }
+      );
+    }
+
+    // 4. Update originating Purchase Order if linked
+    if (updated.purchaseOrderId) {
+      try {
+        await PurchaseOrderService.recordGrnReceipt({
+          poId: updated.purchaseOrderId,
+          grnId: updated._id,
+          receivedItems: updated.items.map((it) => ({
+            productId: it.productId as mongoose.Types.ObjectId,
+            variantId: it.variantId as mongoose.Types.ObjectId,
+            receivedQuantity: Math.max(0, (it.receivedQuantity || 0) - (it.damagedQuantity || 0) - (it.rejectedQuantity || 0)),
+          })),
+          session: params.session,
+        });
+      } catch (poErr) {
+        console.error("[confirmGrn] PO sync warning:", poErr);
+      }
+    }
+
+    // 5. Create Supplier Payable record idempotently and update vendor outstanding balance
+    const existingPayable = await SupplierPayable.findOne({
+      businessId: updated.businessId,
+      grnId: updated._id,
+      isCancelled: false,
+    }).session(params.session || null);
+
+    if (!existingPayable && updated.netInvoiceTotal > 0) {
+      const payableNumber = generateReferenceCode("PAY", Math.floor(Math.random() * 9000 + 1000));
+      await SupplierPayable.create(
+        [
+          {
+            businessId: updated.businessId,
+            dealershipId: updated.dealershipId,
+            supplierId: updated.supplierId,
+            principalCompanyId: updated.principalCompanyId,
+            grnId: updated._id,
+            purchaseOrderId: updated.purchaseOrderId,
+            payableNumber,
+            invoiceNumber: updated.invoiceNumber || updated.challanNumber,
+            invoiceDate: updated.invoiceDate || updated.challanDate,
+            challanNumber: updated.challanNumber,
+            grossAmount: updated.grossTotal,
+            earnedDiscounts: updated.totalLineDiscount + updated.invoiceDiscount + updated.tradeDiscount,
+            conditionalCashDiscount: updated.cashDiscount,
+            freightCharge: updated.freightCharge,
+            handlingCharge: updated.handlingCharge,
+            taxAmount: updated.taxTotal,
+            netPayable: updated.netInvoiceTotal,
+            paidAmount: 0,
+            outstandingBalance: updated.netInvoiceTotal,
+            status: "UNPAID",
+          },
+        ],
+        { session: params.session }
+      );
+
+      // Increment supplier's current payable
+      await Vendor.findByIdAndUpdate(
+        updated.supplierId,
+        { $inc: { currentPayable: updated.netInvoiceTotal } },
+        { session: params.session }
+      );
     }
 
     await AuditLog.create({
@@ -623,6 +716,7 @@ export class GoodsReceiptNoteService {
     }
 
     grn.status = "CANCELLED";
+    grn.isCancelled = true;
     grn.cancelledBy = new mongoose.Types.ObjectId(String(params.actorId));
     grn.cancelledAt = new Date();
     grn.cancellationReason = params.reason;

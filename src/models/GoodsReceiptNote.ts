@@ -120,6 +120,7 @@ export interface IGoodsReceiptNote extends Document {
 
   // Concurrency & Safeguards
   idempotencyKey?: string;
+  isCancelled: boolean;
 
   // Audit & Workflow
   createdBy: mongoose.Types.ObjectId;
@@ -309,6 +310,11 @@ const GoodsReceiptNoteSchema = new Schema<IGoodsReceiptNote>(
       sparse: true,
       index: true,
     },
+    isCancelled: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
 
     createdBy: {
       type: Schema.Types.ObjectId,
@@ -357,7 +363,7 @@ GoodsReceiptNoteSchema.index(
   { businessId: 1, supplierId: 1, challanNumber: 1 },
   {
     unique: true,
-    partialFilterExpression: { status: { $ne: "CANCELLED" } },
+    partialFilterExpression: { isCancelled: false },
     name: "uniq_grn_business_supplier_challan",
   }
 );

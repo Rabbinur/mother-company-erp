@@ -203,12 +203,12 @@ export class GrnCostAllocationService {
       } as IGRNItem;
     });
 
+    // Cash discount is conditional upon prompt payment; it does not reduce invoice billed total or inventory landed cost before being earned
     const netInvoiceTotal = Math.max(
       0,
       grossTotal -
         totalLineDiscount -
         invDiscount -
-        cashDisc -
         tradeDisc +
         freight +
         handling +
