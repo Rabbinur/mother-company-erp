@@ -1,47 +1,16 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { Store, Plus, Search, AlertCircle, CheckCircle2 } from "lucide-react";
+import { DealershipTable, type DealershipItem } from "@/components/dealerships/DealershipTable";
 import {
-  Store,
-  Plus,
-  Search,
-  Edit2,
-  Trash2,
-  AlertCircle,
-  CheckCircle2,
-  Briefcase,
-  X,
-} from "lucide-react";
-import { formatShortDate } from "@/lib/utils";
-
-interface Dealership {
-  _id: string;
-  businessId: string;
-  principalCompanyId?: { _id: string; name: string; code: string } | string;
-  name: string;
-  code: string;
-  status: "active" | "inactive";
-  contactPerson?: string;
-  contactPhone?: string;
-  contactEmail?: string;
-  address?: {
-    street?: string;
-    city?: string;
-    state?: string;
-    postalCode?: string;
-    country?: string;
-  };
-  createdAt: string;
-}
-
-interface PrincipalOption {
-  _id: string;
-  name: string;
-  code: string;
-}
+  DealershipModal,
+  type DealershipFormData,
+  type PrincipalOption,
+} from "@/components/dealerships/DealershipModal";
 
 export default function DealershipsPage() {
-  const [dealerships, setDealerships] = useState<Dealership[]>([]);
+  const [dealerships, setDealerships] = useState<DealershipItem[]>([]);
   const [principals, setPrincipals] = useState<PrincipalOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -53,21 +22,8 @@ export default function DealershipsPage() {
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedDealership, setSelectedDealership] = useState<DealershipItem | null>(null);
   const [saving, setSaving] = useState(false);
-
-  // Form fields
-  const [name, setName] = useState("");
-  const [code, setCode] = useState("");
-  const [principalCompanyId, setPrincipalCompanyId] = useState("");
-  const [status, setStatus] = useState<"active" | "inactive">("active");
-  const [contactPerson, setContactPerson] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
-  const [street, setStreet] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [country, setCountry] = useState("Bangladesh");
 
   useEffect(() => {
     fetchPrincipals();
@@ -111,67 +67,27 @@ export default function DealershipsPage() {
     }
   };
 
-  const openCreateModal = () => {
+  const handleOpenCreate = () => {
     setIsEditing(false);
-    setSelectedId(null);
-    setName("");
-    setCode("");
-    setPrincipalCompanyId("");
-    setStatus("active");
-    setContactPerson("");
-    setContactPhone("");
-    setContactEmail("");
-    setStreet("");
-    setCity("");
-    setState("");
-    setCountry("Bangladesh");
+    setSelectedDealership(null);
     setModalOpen(true);
   };
 
-  const openEditModal = (d: Dealership) => {
+  const handleOpenEdit = (dealership: DealershipItem) => {
     setIsEditing(true);
-    setSelectedId(d._id);
-    setName(d.name);
-    setCode(d.code);
-    const pId = typeof d.principalCompanyId === "object" && d.principalCompanyId
-      ? d.principalCompanyId._id
-      : (d.principalCompanyId as string) || "";
-    setPrincipalCompanyId(pId);
-    setStatus(d.status);
-    setContactPerson(d.contactPerson || "");
-    setContactPhone(d.contactPhone || "");
-    setContactEmail(d.contactEmail || "");
-    setStreet(d.address?.street || "");
-    setCity(d.address?.city || "");
-    setState(d.address?.state || "");
-    setCountry(d.address?.country || "Bangladesh");
+    setSelectedDealership(dealership);
     setModalOpen(true);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (payload: DealershipFormData) => {
     try {
       setSaving(true);
       setError(null);
       setSuccess(null);
 
-      const payload = {
-        name,
-        code,
-        principalCompanyId: principalCompanyId || null,
-        status,
-        contactPerson,
-        contactPhone,
-        contactEmail,
-        address: {
-          street,
-          city,
-          state,
-          country,
-        },
-      };
-
-      const url = isEditing ? `/api/v1/dealerships/${selectedId}` : "/api/v1/dealerships";
+      const url = isEditing && selectedDealership
+        ? `/api/v1/dealerships/${selectedDealership._id}`
+        : "/api/v1/dealerships";
       const method = isEditing ? "PUT" : "POST";
 
       const res = await fetch(url, {
@@ -196,7 +112,7 @@ export default function DealershipsPage() {
   };
 
   const handleDelete = async (id: string, dealershipName: string) => {
-    if (!confirm(`Are you sure you want to deactivate and remove dealership "${dealershipName}"?`)) {
+    if (!confirm(`Are you sure you want to deactivate dealership "${dealershipName}"?`)) {
       return;
     }
 
@@ -233,7 +149,7 @@ export default function DealershipsPage() {
           </p>
         </div>
         <button
-          onClick={openCreateModal}
+          onClick={handleOpenCreate}
           className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary/90 focus:outline-none"
         >
           <Plus className="h-4 w-4" />
@@ -292,277 +208,24 @@ export default function DealershipsPage() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-          <thead className="bg-slate-50 dark:bg-slate-800/60">
-            <tr>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Dealership Name & Code
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Principal Company
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Contact Person & Phone
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Status
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Created
-              </th>
-              <th className="px-6 py-3.5 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-sm">
-            {loading ? (
-              <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
-                  <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                  <p className="mt-2 text-xs">Loading dealerships...</p>
-                </td>
-              </tr>
-            ) : dealerships.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
-                  No dealerships found.
-                </td>
-              </tr>
-            ) : (
-              dealerships.map((d) => {
-                const principalName =
-                  typeof d.principalCompanyId === "object" && d.principalCompanyId
-                    ? d.principalCompanyId.name
-                    : "—";
+      {/* Table Component */}
+      <DealershipTable
+        dealerships={dealerships}
+        loading={loading}
+        onEdit={handleOpenEdit}
+        onDelete={handleDelete}
+      />
 
-                return (
-                  <tr key={d._id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-slate-900 dark:text-white">{d.name}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
-                        Code: {d.code}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      {principalName !== "—" ? (
-                        <span className="inline-flex items-center gap-1.5 rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
-                          <Briefcase className="h-3 w-3" />
-                          {principalName}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-400">Independent</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-slate-700 dark:text-slate-300">
-                      <div>{d.contactPerson || "—"}</div>
-                      <div className="text-xs text-slate-400">{d.contactPhone || d.contactEmail || "—"}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          d.status === "active"
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                            : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400"
-                        }`}
-                      >
-                        {d.status.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-xs text-slate-500 dark:text-slate-400">
-                      {formatShortDate(d.createdAt)}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => openEditModal(d)}
-                          className="rounded p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                          title="Edit Dealership"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(d._id, d.name)}
-                          className="rounded p-1 text-red-400 hover:text-red-600"
-                          title="Delete Dealership"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900">
-            <div className="flex items-center justify-between border-b pb-3 dark:border-slate-800">
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
-                {isEditing ? "Edit Dealership" : "Add Dealership"}
-              </h3>
-              <button
-                onClick={() => setModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSave} className="mt-4 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Dealership Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Uttara Motors"
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Dealership Code *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    disabled={isEditing}
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    placeholder="e.g. DLR-001"
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:disabled:bg-slate-800/50"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Principal Company
-                  </label>
-                  <select
-                    value={principalCompanyId}
-                    onChange={(e) => setPrincipalCompanyId(e.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  >
-                    <option value="">None / Independent</option>
-                    {principals.map((p) => (
-                      <option key={p._id} value={p._id}>
-                        {p.name} ({p.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Status
-                  </label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value as "active" | "inactive")}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Contact Person
-                  </label>
-                  <input
-                    type="text"
-                    value={contactPerson}
-                    onChange={(e) => setContactPerson(e.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Contact Phone
-                  </label>
-                  <input
-                    type="text"
-                    value={contactPhone}
-                    onChange={(e) => setContactPhone(e.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Contact Email
-                  </label>
-                  <input
-                    type="email"
-                    value={contactEmail}
-                    onChange={(e) => setContactEmail(e.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    City
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="City"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Street Address
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Address"
-                    value={street}
-                    onChange={(e) => setStreet(e.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {saving ? "Saving..." : isEditing ? "Save Changes" : "Create Dealership"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Modal Component */}
+      <DealershipModal
+        isOpen={modalOpen}
+        isEditing={isEditing}
+        initialData={selectedDealership}
+        principals={principals}
+        saving={saving}
+        onClose={() => setModalOpen(false)}
+        onSave={handleSave}
+      />
     </div>
   );
 }

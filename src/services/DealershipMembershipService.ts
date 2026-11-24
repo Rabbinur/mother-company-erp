@@ -35,6 +35,19 @@ export interface MembershipQueryParams {
   limit?: number;
 }
 
+export interface UserDealershipSummary {
+  membershipId: string | mongoose.Types.ObjectId;
+  dealership: {
+    _id: string | mongoose.Types.ObjectId;
+    name: string;
+    code: string;
+    status: string;
+    principalCompanyId?: mongoose.Types.ObjectId;
+  };
+  role: string;
+  isPrimary: boolean;
+}
+
 export class DealershipMembershipService {
   /**
    * Lists dealership memberships within a business with filters and pagination.
@@ -271,7 +284,7 @@ export class DealershipMembershipService {
   static async getUserDealerships(
     userId: string | mongoose.Types.ObjectId,
     businessId: string | mongoose.Types.ObjectId
-  ): Promise<any[]> {
+  ): Promise<UserDealershipSummary[]> {
     const memberships = await DealershipMembership.find({
       userId,
       businessId,
@@ -281,9 +294,9 @@ export class DealershipMembershipService {
       .populate("dealershipId", "name code status principalCompanyId")
       .lean();
 
-    return memberships.map((m: any) => ({
-      membershipId: m._id,
-      dealership: m.dealershipId,
+    return memberships.map((m) => ({
+      membershipId: m._id as mongoose.Types.ObjectId,
+      dealership: m.dealershipId as unknown as UserDealershipSummary["dealership"],
       role: m.role,
       isPrimary: m.isPrimary,
     }));
