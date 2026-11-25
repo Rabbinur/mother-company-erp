@@ -44,6 +44,17 @@ export const PERMISSIONS = {
   DISPATCH_RETURN: "dispatch.return",
   DISPATCH_CLOSE: "dispatch.close",
 
+  // Returns & Claims (Phase 3 Step 7)
+  RETURNS_VIEW: "returns.view",
+  RETURNS_CREATE: "returns.create",
+  RETURNS_INSPECT: "returns.inspect",
+  RETURNS_APPROVE: "returns.approve",
+  RETURNS_REFUND: "returns.refund",
+  CLAIMS_VIEW: "claims.view",
+  CLAIMS_CREATE: "claims.create",
+  CLAIMS_APPROVE: "claims.approve",
+  CLAIMS_SETTLE: "claims.settle",
+
   // Financial & Accounting
   PAYMENTS_VIEW: "payments.view",
   PAYMENTS_CREATE: "payments.create",

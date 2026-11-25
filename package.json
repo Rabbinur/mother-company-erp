@@ -3,15 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "node init && next dev --webpack",
-    "build": "node init && next build --webpack",
-    "start": "node init && next start",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
     "lint": "next lint",
     "seed": "node scripts/seed.mjs",
     "test:procurement": "node --experimental-strip-types --import ./tests/register.mjs --test tests/phase3-procurement.test.mjs",
     "test:sales": "node --experimental-strip-types --import ./tests/register.mjs --test tests/phase3-sales-order.test.mjs",
     "test:delivery": "node --experimental-strip-types --import ./tests/register.mjs --test tests/phase3-delivery-dispatch.test.mjs",
-    "test": "node --experimental-strip-types --import ./tests/register.mjs --test tests/erp-core.test.mjs tests/phase1-tenancy-security.test.mjs tests/preflight-tenancy-check.test.mjs tests/migrate-legacy-tenancy.test.mjs tests/rollback-legacy-tenancy.test.mjs tests/migration-e2e-simulation.test.mjs tests/phase3-business-foundation.test.mjs tests/phase3-product-pricing.test.mjs tests/phase3-inventory-warehouse.test.mjs tests/phase3-challan-grn.test.mjs tests/phase3-procurement.test.mjs tests/phase3-sales-order.test.mjs tests/phase3-delivery-dispatch.test.mjs"
+    "test:returns": "node --experimental-strip-types --import ./tests/register.mjs --test tests/phase3-returns-claims.test.mjs",
+    "test": "node --experimental-strip-types --import ./tests/register.mjs --test tests/erp-core.test.mjs tests/phase1-tenancy-security.test.mjs tests/preflight-tenancy-check.test.mjs tests/migrate-legacy-tenancy.test.mjs tests/rollback-legacy-tenancy.test.mjs tests/migration-e2e-simulation.test.mjs tests/phase3-business-foundation.test.mjs tests/phase3-product-pricing.test.mjs tests/phase3-inventory-warehouse.test.mjs tests/phase3-challan-grn.test.mjs tests/phase3-procurement.test.mjs tests/phase3-sales-order.test.mjs tests/phase3-delivery-dispatch.test.mjs tests/phase3-returns-claims.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

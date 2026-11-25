@@ -1,142 +1,224 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import {
-  RotateCcw,
-  Plus,
-  CheckCircle,
-  AlertOctagon,
-  Clock,
-  X,
-  FileText,
-} from "lucide-react";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { ReturnsHeader } from "@/components/returns/ReturnsHeader";
+import { ReturnsKpiCards } from "@/components/returns/ReturnsKpiCards";
+import { SalesReturnTable, SalesReturnSummary } from "@/components/returns/SalesReturnTable";
+import { PurchaseReturnTable, PurchaseReturnSummary } from "@/components/returns/PurchaseReturnTable";
+import { ClaimTable, ClaimSummary } from "@/components/returns/ClaimTable";
+import { CreateSalesReturnModal } from "@/components/returns/CreateSalesReturnModal";
+import { InspectReturnModal } from "@/components/returns/InspectReturnModal";
+import { ProcessRefundModal } from "@/components/returns/ProcessRefundModal";
+import { CreateClaimModal } from "@/components/returns/CreateClaimModal";
 
-export default function ReturnsPage() {
-  const [tab, setTab] = useState<"sales" | "purchases">("sales");
-  const [salesReturns, setSalesReturns] = useState<any[]>([]);
-  const [purchaseReturns, setPurchaseReturns] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function ReturnsDashboardPage() {
+  const [activeTab, setActiveTab] = useState<"sales" | "purchases" | "claims">("sales");
+  const [salesReturns, setSalesReturns] = useState<SalesReturnSummary[]>([]);
+  const [purchaseReturns, setPurchaseReturns] = useState<PurchaseReturnSummary[]>([]);
+  const [claims, setClaims] = useState<ClaimSummary[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    fetchReturns();
-  }, [tab]);
+  // Modals state
+  const [isCreateSalesModalOpen, setIsCreateSalesModalOpen] = useState(false);
+  const [isCreateClaimModalOpen, setIsCreateClaimModalOpen] = useState(false);
+  const [inspectReturn, setInspectReturn] = useState<SalesReturnSummary | null>(null);
+  const [refundReturn, setRefundReturn] = useState<SalesReturnSummary | null>(null);
 
-  const fetchReturns = async () => {
+  const fetchData = async () => {
     try {
-      setLoading(true);
-      const endpoint = tab === "sales" ? "/api/v1/returns/sales" : "/api/v1/returns/purchases";
-      const res = await fetch(endpoint);
-      const json = await res.json();
-      if (json.success) {
-        if (tab === "sales") setSalesReturns(json.data || []);
-        else setPurchaseReturns(json.data || []);
+      setIsLoading(true);
+      if (activeTab === "sales") {
+        const res = await fetch("/api/v1/returns/sales");
+        const json = await res.json();
+        if (json.success) setSalesReturns(json.data || []);
+      } else if (activeTab === "purchases") {
+        const res = await fetch("/api/v1/returns/purchases");
+        const json = await res.json();
+        if (json.success) setPurchaseReturns(json.data || []);
+      } else {
+        const res = await fetch("/api/v1/claims");
+        const json = await res.json();
+        if (json.success) setClaims(json.data || []);
       }
     } catch (err) {
-      console.error(err);
+      console.error("Failed to load returns data:", err);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [activeTab]);
+
+  // KPIs calculation
+  const pendingInspections = salesReturns.filter(
+    (r) => r.status === "REQUESTED" || r.status === "UNDER_INSPECTION"
+  ).length;
+  const approvedRestocked = salesReturns.filter(
+    (r) => r.status === "APPROVED" || r.status === "RESTOCKED"
+  ).length;
+  const pendingRefunds = salesReturns.filter(
+    (r) => (r.status === "APPROVED" || r.status === "RESTOCKED") && r.refundStatus === "PENDING"
+  ).length;
+  const activeClaimsCount = claims.filter(
+    (c) => c.status === "SUBMITTED" || c.status === "UNDER_REVIEW" || c.status === "APPROVED"
+  ).length;
+
+  const handleDispatchPurchaseReturn = async (ret: PurchaseReturnSummary) => {
+    if (!confirm(`Dispatch inventory for supplier return ${ret.returnNumber}?`)) return;
+    try {
+      const res = await fetch(`/api/v1/returns/purchases/${ret._id}/dispatch`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) alert(json.message || "Failed to dispatch return");
+      else fetchData();
+    } catch (err: any) {
+      alert(err.message || "Dispatch error");
+    }
+  };
+
+  const handleSettlePurchaseReturn = async (ret: PurchaseReturnSummary) => {
+    const amountStr = prompt(
+      `Enter settled credit amount for ${ret.returnNumber}:`,
+      String(ret.totalDebitAmount)
+    );
+    if (!amountStr) return;
+    try {
+      const res = await fetch(`/api/v1/returns/purchases/${ret._id}/settle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settledAmount: Number(amountStr),
+          creditNoteNumber: "CN-AUTO-" + Date.now(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) alert(json.message || "Failed to settle return");
+      else fetchData();
+    } catch (err: any) {
+      alert(err.message || "Settlement error");
+    }
+  };
+
+  const handleApproveClaim = async (claim: ClaimSummary) => {
+    const amountStr = prompt(
+      `Enter approved amount for claim ${claim.claimNumber}:`,
+      String(claim.claimedAmount)
+    );
+    if (!amountStr) return;
+    try {
+      const res = await fetch(`/api/v1/claims/${claim._id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approvedAmount: Number(amountStr) }),
+      });
+      const json = await res.json();
+      if (!res.ok) alert(json.message || "Failed to approve claim");
+      else fetchData();
+    } catch (err: any) {
+      alert(err.message || "Approval error");
+    }
+  };
+
+  const handleSettleClaim = async (claim: ClaimSummary) => {
+    const amountStr = prompt(
+      `Enter settled settlement payout for ${claim.claimNumber}:`,
+      String(claim.approvedAmount || claim.claimedAmount)
+    );
+    if (!amountStr) return;
+    try {
+      const res = await fetch(`/api/v1/claims/${claim._id}/settle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settledAmount: Number(amountStr) }),
+      });
+      const json = await res.json();
+      if (!res.ok) alert(json.message || "Failed to settle claim");
+      else fetchData();
+    } catch (err: any) {
+      alert(err.message || "Settlement error");
     }
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900">
-            Returns & Quality Inspection
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Customer sales returns and vendor purchase returns with condition inspection
-          </p>
-        </div>
+    <div className="container mx-auto px-4 py-6 max-w-7xl">
+      <ReturnsHeader
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onNewSalesReturnClick={() => setIsCreateSalesModalOpen(true)}
+        onNewClaimClick={() => setIsCreateClaimModalOpen(true)}
+        onRefresh={fetchData}
+        isLoading={isLoading}
+      />
 
-        <div className="flex rounded-lg border border-slate-200 bg-white p-1">
-          <button
-            onClick={() => setTab("sales")}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-              tab === "sales" ? "bg-primary text-white shadow-xs" : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            Sales Returns
-          </button>
-          <button
-            onClick={() => setTab("purchases")}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-              tab === "purchases" ? "bg-primary text-white shadow-xs" : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            Purchase Returns
-          </button>
-        </div>
-      </div>
+      <ReturnsKpiCards
+        pendingInspectionCount={pendingInspections}
+        approvedRestockedCount={approvedRestocked}
+        pendingRefundCount={pendingRefunds}
+        activeClaimsCount={activeClaimsCount}
+      />
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-50/75 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              <tr>
-                <th className="px-5 py-3.5">Return #</th>
-                <th className="px-4 py-3.5">Reference Document</th>
-                <th className="px-4 py-3.5">Party (Customer / Vendor)</th>
-                <th className="px-4 py-3.5">Reason</th>
-                <th className="px-4 py-3.5">Restocked?</th>
-                <th className="px-4 py-3.5">Adjustment Amount</th>
-                <th className="px-4 py-3.5">Date</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-xs text-slate-400">
-                    Loading returns...
-                  </td>
-                </tr>
-              ) : (tab === "sales" ? salesReturns : purchaseReturns).length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-xs text-slate-400">
-                    No return events recorded.
-                  </td>
-                </tr>
-              ) : (
-                (tab === "sales" ? salesReturns : purchaseReturns).map((r) => (
-                  <tr key={r._id} className="hover:bg-slate-50/50">
-                    <td className="px-5 py-3.5 font-mono font-bold text-slate-900">
-                      {r.returnNumber}
-                    </td>
-                    <td className="px-4 py-3.5 font-mono text-slate-600">
-                      {tab === "sales" ? r.orderNumber : r.purchaseNumber}
-                    </td>
-                    <td className="px-4 py-3.5 font-semibold text-slate-800">
-                      {tab === "sales"
-                        ? r.customerId?.shopName || "Customer"
-                        : r.vendorId?.companyName || "Vendor"}
-                    </td>
-                    <td className="px-4 py-3.5 text-slate-600">{r.reason}</td>
-                    <td className="px-4 py-3.5">
-                      {r.restocked ? (
-                        <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                          <CheckCircle className="h-3 w-3" /> Yes (Good Condition)
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-                          <AlertOctagon className="h-3 w-3" /> Damaged / Not Restocked
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3.5 font-bold text-primary">
-                      {formatCurrency(tab === "sales" ? r.totalRefundAmount : r.totalDebitAmount)}
-                    </td>
-                    <td className="px-4 py-3.5 text-slate-400 text-[11px]">
-                      {formatDate(r.createdAt)}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {activeTab === "sales" && (
+        <SalesReturnTable
+          returns={salesReturns}
+          isLoading={isLoading}
+          onInspect={(ret) => setInspectReturn(ret)}
+          onRefund={(ret) => setRefundReturn(ret)}
+        />
+      )}
+
+      {activeTab === "purchases" && (
+        <PurchaseReturnTable
+          returns={purchaseReturns}
+          isLoading={isLoading}
+          onDispatch={handleDispatchPurchaseReturn}
+          onSettle={handleSettlePurchaseReturn}
+        />
+      )}
+
+      {activeTab === "claims" && (
+        <ClaimTable
+          claims={claims}
+          isLoading={isLoading}
+          onApprove={handleApproveClaim}
+          onSettle={handleSettleClaim}
+        />
+      )}
+
+      <CreateSalesReturnModal
+        isOpen={isCreateSalesModalOpen}
+        onClose={() => setIsCreateSalesModalOpen(false)}
+        onSuccess={fetchData}
+      />
+
+      <CreateClaimModal
+        isOpen={isCreateClaimModalOpen}
+        onClose={() => setIsCreateClaimModalOpen(false)}
+        onSuccess={fetchData}
+      />
+
+      {inspectReturn && (
+        <InspectReturnModal
+          isOpen={!!inspectReturn}
+          onClose={() => setInspectReturn(null)}
+          onSuccess={fetchData}
+          returnId={inspectReturn._id}
+          returnNumber={inspectReturn.returnNumber}
+        />
+      )}
+
+      {refundReturn && (
+        <ProcessRefundModal
+          isOpen={!!refundReturn}
+          onClose={() => setRefundReturn(null)}
+          onSuccess={fetchData}
+          returnId={refundReturn._id}
+          returnNumber={refundReturn.returnNumber}
+          maxRefundAmount={refundReturn.netRefundAmount ?? refundReturn.totalReturnedAmount}
+        />
+      )}
     </div>
   );
 }

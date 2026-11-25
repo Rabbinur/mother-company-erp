@@ -39,3 +39,4 @@ export * from "./SupplierPayable";
 export * from "./Counter";
 export * from "./Vehicle";
 export * from "./Dispatch";
+export * from "./Claim";
