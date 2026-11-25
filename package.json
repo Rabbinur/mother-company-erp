@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "node init && next dev --webpack",
-    "build": "node init && next build --webpack",
-    "start": "node init && next start",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
     "lint": "next lint",
     "seed": "node scripts/seed.mjs",
     "test": "node --experimental-strip-types --import ./tests/register.mjs --test tests/erp-core.test.mjs tests/phase1-tenancy-security.test.mjs tests/preflight-tenancy-check.test.mjs tests/migrate-legacy-tenancy.test.mjs tests/rollback-legacy-tenancy.test.mjs tests/migration-e2e-simulation.test.mjs tests/phase3-business-foundation.test.mjs"
