@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import {
   Package,
   Users,
@@ -165,6 +166,14 @@ export default function OperationalAnalyticsPage() {
             <LineChart className="h-4 w-4" />
             <span>Demand & Reorder Radar</span>
           </button>
+
+          <Link
+            href="/analytics/operations"
+            className="inline-flex items-center gap-2 border-b-2 border-transparent py-3 px-3 text-xs font-semibold text-emerald-600 hover:border-emerald-300 hover:text-emerald-700 transition-colors ml-auto"
+          >
+            <Truck className="h-4 w-4" />
+            <span>Operations & Logistics ➔</span>
+          </Link>
         </nav>
       </div>
 

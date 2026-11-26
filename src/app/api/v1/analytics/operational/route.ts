@@ -48,12 +48,34 @@ export async function GET(req: NextRequest) {
     }
 
     const principalCompanyId = searchParams.get("principalCompanyId") || undefined;
+    const warehouseId = searchParams.get("warehouseId") || undefined;
+    const vehicleId = searchParams.get("vehicleId") || undefined;
+    const deliverymanId = searchParams.get("deliverymanId") || undefined;
+    const workerId = searchParams.get("workerId") || undefined;
+
     const periodPreset = searchParams.get("period") || "last_30_days";
     const startDate = searchParams.get("startDate") || undefined;
     const endDate = searchParams.get("endDate") || undefined;
     const domain = (searchParams.get("domain") as any) || "all";
 
     const canViewCosts = canUserViewPurchaseCost(user);
+
+    if (domain === "operations") {
+      const payload = await OperationalAnalyticsService.getOperationalIntelligence({
+        businessId,
+        dealershipId,
+        principalCompanyId: principalCompanyId === "all" ? undefined : principalCompanyId,
+        warehouseId: warehouseId === "all" ? undefined : warehouseId,
+        vehicleId: vehicleId === "all" ? undefined : vehicleId,
+        deliverymanId: deliverymanId === "all" ? undefined : deliverymanId,
+        workerId: workerId === "all" ? undefined : workerId,
+        periodPreset,
+        startDate,
+        endDate,
+        canViewCosts,
+      });
+      return successResponse(payload, "Operational logistics intelligence retrieved successfully");
+    }
 
     const payload = await OperationalAnalyticsService.getOperationalAnalytics({
       businessId,
