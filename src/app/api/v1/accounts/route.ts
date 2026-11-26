@@ -20,9 +20,21 @@ export async function GET(req: NextRequest) {
   if (!authorized) return forbiddenResponse();
 
   await connectDB();
-  await AccountingService.ensureDefaultAccounts();
+  const searchParams = req.nextUrl.searchParams;
+  const businessId = searchParams.get("businessId") || user.businessId;
+  const dealershipId = searchParams.get("dealershipId");
 
-  const accounts = await Account.find({ status: "active" }).sort({ code: 1 }).lean();
+  await AccountingService.ensureDefaultAccounts(businessId, dealershipId || undefined);
+
+  const query: Record<string, unknown> = { status: "active" };
+  if (businessId) {
+    query.businessId = businessId;
+  }
+  if (dealershipId) {
+    query.dealershipId = dealershipId;
+  }
+
+  const accounts = await Account.find(query).sort({ code: 1 }).lean();
   return successResponse(accounts);
 }
 
@@ -37,23 +49,34 @@ export async function POST(req: NextRequest) {
   try {
     await connectDB();
     const body = await req.json();
-    const { code, name, type, subType, description } = body;
+    const { code, name, type, subType, description, category, normalBalance, businessId, dealershipId } = body;
 
-    if (!code || !name || !type || !subType) {
-      return errorResponse("Code, Name, Type, and SubType are required", 400);
+    if (!code || !name) {
+      return errorResponse("Code and Name are required", 400);
     }
 
     const cleanCode = String(code).trim();
-    const existing = await Account.findOne({ code: cleanCode });
+    const bId = businessId || user.businessId;
+    const dId = dealershipId || undefined;
+
+    const existing = await Account.findOne({
+      code: cleanCode,
+      ...(bId ? { businessId: bId } : {}),
+      ...(dId ? { dealershipId: dId } : {}),
+    });
     if (existing) {
-      return errorResponse(`Account with code '${cleanCode}' already exists`, 400);
+      return errorResponse(`Account with code '${cleanCode}' already exists for this scope`, 400);
     }
 
     const account = await Account.create({
       code: cleanCode,
       name,
-      type,
-      subType,
+      type: type || (category ? String(category).toLowerCase() : "asset"),
+      category: category || (type ? String(type).toUpperCase() : "ASSET"),
+      subType: subType || "current_asset",
+      normalBalance: normalBalance || "DEBIT",
+      businessId: bId,
+      dealershipId: dId,
       balance: 0,
       currency: "BDT",
       isSystem: false,

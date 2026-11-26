@@ -252,6 +252,40 @@ describe("Phase 3 - Step 7: Returns, Claims & Reverse Logistics Test Suite", () 
       return ret;
     };
 
+    SalesReturn.findOneAndUpdate = (query, update, options) => {
+      const r = salesReturns.find((x) => {
+        if (query._id && String(x._id) !== String(query._id)) return false;
+        if (query.status) {
+          if (Array.isArray(query.status.$in) && !query.status.$in.includes(x.status)) return false;
+          if (typeof query.status === "string" && x.status !== query.status) return false;
+        }
+        if (query.refundStatus) {
+          if (Array.isArray(query.refundStatus.$in) && !query.refundStatus.$in.includes(x.refundStatus)) return false;
+          if (typeof query.refundStatus === "string" && x.refundStatus !== query.refundStatus) return false;
+        }
+        return true;
+      });
+      if (r && update?.$set) {
+        Object.assign(r, update.$set);
+      }
+      const chainable = {
+        session: () => chainable,
+        then: (resolve, reject) => Promise.resolve(r || null).then(resolve, reject),
+      };
+      return chainable;
+    };
+
+    SalesReturn.updateOne = (query, update) => {
+      const r = salesReturns.find((x) => {
+        if (query._id && String(x._id) !== String(query._id)) return false;
+        return true;
+      });
+      if (r && update?.$set) {
+        Object.assign(r, update.$set);
+      }
+      return Promise.resolve({ modifiedCount: r ? 1 : 0 });
+    };
+
     // Mock PurchaseReturn
     PurchaseReturn.find = (query = {}) => {
       let filtered = [...purchaseReturns];
@@ -298,6 +332,36 @@ describe("Phase 3 - Step 7: Returns, Claims & Reverse Logistics Test Suite", () 
       return ret;
     };
 
+    PurchaseReturn.findOneAndUpdate = (query, update, options) => {
+      const r = purchaseReturns.find((x) => {
+        if (query._id && String(x._id) !== String(query._id)) return false;
+        if (query.status) {
+          if (Array.isArray(query.status.$in) && !query.status.$in.includes(x.status)) return false;
+          if (typeof query.status === "string" && x.status !== query.status) return false;
+        }
+        return true;
+      });
+      if (r && update?.$set) {
+        Object.assign(r, update.$set);
+      }
+      const chainable = {
+        session: () => chainable,
+        then: (resolve, reject) => Promise.resolve(r || null).then(resolve, reject),
+      };
+      return chainable;
+    };
+
+    PurchaseReturn.updateOne = (query, update) => {
+      const r = purchaseReturns.find((x) => {
+        if (query._id && String(x._id) !== String(query._id)) return false;
+        return true;
+      });
+      if (r && update?.$set) {
+        Object.assign(r, update.$set);
+      }
+      return Promise.resolve({ modifiedCount: r ? 1 : 0 });
+    };
+
     // Mock Claim
     Claim.find = (query = {}) => {
       let filtered = [...claims];
@@ -339,6 +403,36 @@ describe("Phase 3 - Step 7: Returns, Claims & Reverse Logistics Test Suite", () 
       };
       claims.push(cl);
       return cl;
+    };
+
+    Claim.findOneAndUpdate = (query, update, options) => {
+      const c = claims.find((x) => {
+        if (query._id && String(x._id) !== String(query._id)) return false;
+        if (query.status) {
+          if (Array.isArray(query.status.$in) && !query.status.$in.includes(x.status)) return false;
+          if (typeof query.status === "string" && x.status !== query.status) return false;
+        }
+        return true;
+      });
+      if (c && update?.$set) {
+        Object.assign(c, update.$set);
+      }
+      const chainable = {
+        session: () => chainable,
+        then: (resolve, reject) => Promise.resolve(c || null).then(resolve, reject),
+      };
+      return chainable;
+    };
+
+    Claim.updateOne = (query, update) => {
+      const c = claims.find((x) => {
+        if (query._id && String(x._id) !== String(query._id)) return false;
+        return true;
+      });
+      if (c && update?.$set) {
+        Object.assign(c, update.$set);
+      }
+      return Promise.resolve({ modifiedCount: c ? 1 : 0 });
     };
   });
 
@@ -1015,5 +1109,299 @@ describe("Phase 3 - Step 7: Returns, Claims & Reverse Logistics Test Suite", () 
       },
       /unauthorized access to return in another dealership/i
     );
+  });
+
+  test("18. Hardening: Concurrent duplicate customer refund requests are atomic and idempotent (no double deduction)", async () => {
+    const { order, acc } = setupDeliveredOrder(10, 100);
+    acc.currentBalance = 1000;
+
+    const ret = await ReturnsService.createSalesReturnRequest({
+      businessId: bId.toString(),
+      dealershipId: dId1.toString(),
+      orderId: order._id.toString(),
+      reason: "Defective batch",
+      items: [{ productId: prod1Id.toString(), quantity: 3, unitPrice: 100 }],
+    });
+
+    await ReturnsService.approveSalesReturn(ret._id.toString());
+
+    // Fire 2 concurrent refund calls simultaneously with Promise.all
+    const [res1, res2] = await Promise.all([
+      ReturnsService.processCustomerRefund(ret._id.toString(), {
+        refundMethod: "credit_note",
+        refundAmount: 300,
+      }),
+      ReturnsService.processCustomerRefund(ret._id.toString(), {
+        refundMethod: "credit_note",
+        refundAmount: 300,
+      }),
+    ]);
+
+    assert.ok(res1);
+    assert.ok(res2);
+    // Customer balance must be deducted exactly ONCE (1000 - 300 = 700), never twice (400)
+    assert.strictEqual(acc.currentBalance, 700);
+    assert.strictEqual(acc.totalReturned, 300);
+  });
+
+  test("19. Hardening: Concurrent purchase return dispatch calls prevent double inventory depletion", async () => {
+    const { grn, bal } = setupConfirmedGrn(20, 80);
+    bal.onHandQuantity = 20;
+    bal.availableQuantity = 20;
+
+    const pr = await ReturnsService.createPurchaseReturn({
+      businessId: bId.toString(),
+      dealershipId: dId1.toString(),
+      grnId: grn._id.toString(),
+      reason: "Defective goods return",
+      items: [{ productId: prod2Id.toString(), quantity: 5 }],
+    });
+
+    // Fire 2 concurrent dispatch calls
+    const [d1, d2] = await Promise.all([
+      ReturnsService.dispatchPurchaseReturn(pr._id.toString()),
+      ReturnsService.dispatchPurchaseReturn(pr._id.toString()),
+    ]);
+
+    assert.strictEqual(d1.status, "DISPATCHED");
+    assert.strictEqual(d2.status, "DISPATCHED");
+    // Inventory must be deducted exactly once (20 - 5 = 15), never twice (10)
+    assert.strictEqual(bal.onHandQuantity, 15);
+    assert.strictEqual(bal.availableQuantity, 15);
+  });
+
+  test("20. Hardening: Concurrent supplier credit note settlements prevent double payable deduction", async () => {
+    const { grn, sp, vendor } = setupConfirmedGrn(20, 80);
+    sp.remainingAmount = 1600;
+    sp.outstandingBalance = 1600;
+    vendor.currentPayable = 1600;
+
+    const pr = await ReturnsService.createPurchaseReturn({
+      businessId: bId.toString(),
+      dealershipId: dId1.toString(),
+      grnId: grn._id.toString(),
+      reason: "Supplier return",
+      items: [{ productId: prod2Id.toString(), quantity: 4 }],
+    });
+
+    await ReturnsService.dispatchPurchaseReturn(pr._id.toString());
+
+    // Fire 2 concurrent settlements for 320
+    const [s1, s2] = await Promise.all([
+      ReturnsService.settlePurchaseReturn(pr._id.toString(), {
+        settlementType: "payable_deduction",
+        settledAmount: 320,
+      }),
+      ReturnsService.settlePurchaseReturn(pr._id.toString(), {
+        settlementType: "payable_deduction",
+        settledAmount: 320,
+      }),
+    ]);
+
+    assert.strictEqual(s1.status, "SETTLED");
+    assert.strictEqual(s2.status, "SETTLED");
+    // Payable must be deducted exactly once (1600 - 320 = 1280), never twice (960)
+    assert.strictEqual(sp.remainingAmount, 1280);
+    assert.strictEqual(vendor.currentPayable, 1280);
+  });
+
+  test("21. Hardening: Over-settlement exceeding supplier payable balance is strictly rejected", async () => {
+    const { grn, sp, vendor } = setupConfirmedGrn(20, 80);
+    sp.remainingAmount = 200;
+    sp.outstandingBalance = 200;
+    vendor.currentPayable = 200;
+
+    const pr = await ReturnsService.createPurchaseReturn({
+      businessId: bId.toString(),
+      dealershipId: dId1.toString(),
+      grnId: grn._id.toString(),
+      reason: "Supplier return",
+      items: [{ productId: prod2Id.toString(), quantity: 5 }], // 5 * 80 = 400 totalDebitAmount
+    });
+
+    await ReturnsService.dispatchPurchaseReturn(pr._id.toString());
+
+    // Settling 400 when outstanding is only 200 must throw error without silent clamping
+    await assert.rejects(
+      async () => {
+        await ReturnsService.settlePurchaseReturn(pr._id.toString(), {
+          settlementType: "payable_deduction",
+          settledAmount: 400,
+        });
+      },
+      /exceeds supplier payable outstanding balance/i
+    );
+
+    // Outstanding balance remains unchanged
+    assert.strictEqual(sp.outstandingBalance, 200);
+  });
+
+  test("22. Hardening: Negative customer credit balance is preserved on return without Math.max(0) clamping", async () => {
+    const { order, acc } = setupDeliveredOrder(10, 100);
+    // Customer has a current balance of 100 (owes 100)
+    acc.currentBalance = 100;
+
+    const ret = await ReturnsService.createSalesReturnRequest({
+      businessId: bId.toString(),
+      dealershipId: dId1.toString(),
+      orderId: order._id.toString(),
+      reason: "Returning 3 units ($300)",
+      items: [{ productId: prod1Id.toString(), quantity: 3, unitPrice: 100 }],
+    });
+
+    await ReturnsService.approveSalesReturn(ret._id.toString());
+
+    // Process 300 refund: 100 - 300 = -200 (dealership owes customer 200 credit)
+    const refunded = await ReturnsService.processCustomerRefund(ret._id.toString(), {
+      refundMethod: "credit_note",
+      refundAmount: 300,
+    });
+
+    assert.strictEqual(refunded.status, "CLOSED");
+    assert.strictEqual(refunded.refundStatus, "CREDIT_NOTE_ISSUED");
+    // Must NOT be clamped to 0!
+    assert.strictEqual(acc.currentBalance, -200);
+    assert.strictEqual(acc.totalReturned, 300);
+  });
+
+  test("23. Hardening: Cash refund increases totalReturned without double-crediting customer AR balance", async () => {
+    const { order, acc } = setupDeliveredOrder(10, 100);
+    acc.currentBalance = 800; // Customer owes 800
+
+    const ret = await ReturnsService.createSalesReturnRequest({
+      businessId: bId.toString(),
+      dealershipId: dId1.toString(),
+      orderId: order._id.toString(),
+      reason: "Returning 2 units for cash payout",
+      items: [{ productId: prod1Id.toString(), quantity: 2, unitPrice: 100 }],
+    });
+
+    await ReturnsService.approveSalesReturn(ret._id.toString());
+
+    // Refund method = "cash"
+    const refunded = await ReturnsService.processCustomerRefund(ret._id.toString(), {
+      refundMethod: "cash",
+      refundAmount: 200,
+    });
+
+    assert.strictEqual(refunded.status, "CLOSED");
+    assert.strictEqual(refunded.refundStatus, "REFUNDED");
+    // Customer AR balance must remain 800 (cash was paid directly at counter, AR unaffected)
+    assert.strictEqual(acc.currentBalance, 800);
+    // Total returned increases by 200
+    assert.strictEqual(acc.totalReturned, 200);
+  });
+
+  test("24. Hardening: Batch traceability in StockMovement on return restock and return dispatch", async () => {
+    const { order } = setupDeliveredOrder(10, 100);
+
+    const ret = await ReturnsService.createSalesReturnRequest({
+      businessId: bId.toString(),
+      dealershipId: dId1.toString(),
+      orderId: order._id.toString(),
+      reason: "Batch return",
+      items: [
+        {
+          productId: prod1Id.toString(),
+          quantity: 2,
+          unitPrice: 100,
+        },
+      ],
+    });
+
+    // Tag item with batch info for traceability test
+    ret.items[0].batchNumber = "BATCH-2026-X1";
+
+    await ReturnsService.approveSalesReturn(ret._id.toString());
+
+    const move = movements.find((m) => m.referenceId === ret.returnNumber);
+    assert.ok(move);
+    assert.strictEqual(move.batchNumber, "BATCH-2026-X1");
+  });
+
+  test("25. Hardening: Partial supplier return and partial credit-note settlement workflow", async () => {
+    const { grn, sp, vendor, bal } = setupConfirmedGrn(20, 80);
+    bal.onHandQuantity = 20;
+    bal.availableQuantity = 20;
+    sp.remainingAmount = 1600;
+    sp.outstandingBalance = 1600;
+    vendor.currentPayable = 1600;
+
+    // Return 3 out of 20
+    const pr = await ReturnsService.createPurchaseReturn({
+      businessId: bId.toString(),
+      dealershipId: dId1.toString(),
+      grnId: grn._id.toString(),
+      reason: "Partial return 3 units",
+      items: [{ productId: prod2Id.toString(), quantity: 3 }],
+    });
+
+    await ReturnsService.dispatchPurchaseReturn(pr._id.toString());
+    assert.strictEqual(bal.availableQuantity, 17);
+
+    // Settle partial debit amount: 3 * 80 = 240
+    await ReturnsService.settlePurchaseReturn(pr._id.toString(), {
+      settlementType: "payable_deduction",
+      settledAmount: 240,
+      creditNoteNumber: "CN-PARTIAL-01",
+    });
+
+    assert.strictEqual(sp.remainingAmount, 1360);
+    assert.strictEqual(sp.status, "PARTIALLY_PAID");
+    assert.strictEqual(vendor.currentPayable, 1360);
+  });
+
+  test("26. Hardening: Multi-line stock sufficiency check aborts without partial inventory deduction", async () => {
+    const { grn, bal } = setupConfirmedGrn(20, 80);
+    bal.onHandQuantity = 20;
+    bal.availableQuantity = 20;
+
+    // Second product has 0 available inventory
+    const bal2 = {
+      _id: new mongoose.Types.ObjectId(),
+      businessId: bId,
+      dealershipId: dId1,
+      warehouseId: wId,
+      productId: prod1Id,
+      onHandQuantity: 0,
+      availableQuantity: 0,
+      save: async function () {
+        const i = balances.findIndex((b) => String(b._id) === String(this._id));
+        if (i >= 0) balances[i] = this;
+        return this;
+      },
+    };
+    balances.push(bal2);
+
+    // Add second item to grn
+    grn.items.push({
+      productId: prod1Id,
+      variantId: prod1Id,
+      productName: "Secondary Item",
+      receivedQuantity: 10,
+      unitPurchasePrice: 50,
+      netLandedUnitCost: 50,
+    });
+
+    const pr = await ReturnsService.createPurchaseReturn({
+      businessId: bId.toString(),
+      dealershipId: dId1.toString(),
+      grnId: grn._id.toString(),
+      reason: "Multi-line return",
+      items: [
+        { productId: prod2Id.toString(), quantity: 5 },
+        { productId: prod1Id.toString(), quantity: 5 }, // will fail because bal2.availableQuantity is 0
+      ],
+    });
+
+    await assert.rejects(
+      async () => {
+        await ReturnsService.dispatchPurchaseReturn(pr._id.toString());
+      },
+      /insufficient available stock/i
+    );
+
+    // Status remains SUBMITTED (not DISPATCHED)
+    assert.strictEqual(pr.status, "SUBMITTED");
   });
 });

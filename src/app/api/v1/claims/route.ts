@@ -2,15 +2,21 @@ import { NextRequest } from "next/server";
 import { connectDB } from "@/lib/db/connect";
 import { requireAuth } from "@/lib/auth/session";
 import { ReturnsService } from "@/services/ReturnsService";
+import { PERMISSIONS, hasPermission } from "@/lib/auth/permissions";
 import {
   successResponse,
   errorResponse,
   unauthorizedResponse,
+  forbiddenResponse,
 } from "@/lib/utils/api-response";
 
 export async function GET(req: NextRequest) {
   const user = await requireAuth(req);
   if (!user) return unauthorizedResponse();
+
+  if (!hasPermission(user.role, user.permissions, PERMISSIONS.CLAIMS_VIEW)) {
+    return forbiddenResponse("Permission denied: cannot view claims");
+  }
 
   const businessId = user.businessId;
   if (!businessId) return errorResponse("Business context required", 400);
@@ -18,7 +24,12 @@ export async function GET(req: NextRequest) {
   const url = req.nextUrl;
   const status = url.searchParams.get("status") || undefined;
   const claimCategory = url.searchParams.get("category") || undefined;
-  const dealershipId = url.searchParams.get("dealershipId") || user.dealershipId || undefined;
+  const requestedDealership = url.searchParams.get("dealershipId");
+  const isSuperOrOwner = user.role === "super_admin" || user.role === "owner";
+  const dealershipId = isSuperOrOwner
+    ? requestedDealership || user.dealershipId || undefined
+    : user.dealershipId || user.activeDealershipId;
+
   const page = parseInt(url.searchParams.get("page") || "1", 10);
   const limit = parseInt(url.searchParams.get("limit") || "20", 10);
 
@@ -43,6 +54,10 @@ export async function POST(req: NextRequest) {
   const user = await requireAuth(req);
   if (!user) return unauthorizedResponse();
 
+  if (!hasPermission(user.role, user.permissions, PERMISSIONS.CLAIMS_CREATE)) {
+    return forbiddenResponse("Permission denied: cannot create claims");
+  }
+
   const businessId = user.businessId;
   if (!businessId) return errorResponse("Business context required", 400);
 
@@ -53,7 +68,11 @@ export async function POST(req: NextRequest) {
     return errorResponse("Invalid JSON payload", 400);
   }
 
-  const dealershipId = body.dealershipId || user.dealershipId || user.activeDealershipId;
+  const isSuperOrOwner = user.role === "super_admin" || user.role === "owner";
+  const dealershipId = isSuperOrOwner
+    ? body.dealershipId || user.dealershipId || user.activeDealershipId
+    : user.dealershipId || user.activeDealershipId;
+
   if (!dealershipId || !body.claimCategory || !body.referenceType || !body.claimedAmount) {
     return errorResponse("dealershipId, claimCategory, referenceType, and claimedAmount are required", 400);
   }

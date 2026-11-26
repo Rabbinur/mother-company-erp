@@ -4,6 +4,7 @@ export type SalesReturnStatus =
   | "REQUESTED"
   | "RECEIVED"
   | "UNDER_INSPECTION"
+  | "APPROVING"
   | "APPROVED"
   | "REJECTED"
   | "RESTOCKED"
@@ -58,7 +59,7 @@ export interface ISalesReturn extends Document {
   status: SalesReturnStatus;
   restocked: boolean;
   restockedAt?: Date;
-  refundStatus?: "NONE" | "NOT_APPLICABLE" | "PENDING" | "REFUNDED" | "CREDIT_NOTE_ISSUED" | "REJECTED";
+  refundStatus?: "NONE" | "NOT_APPLICABLE" | "PENDING" | "PROCESSING" | "REFUNDED" | "CREDIT_NOTE_ISSUED" | "REJECTED";
   refundMethod?: "credit_note" | "cash" | "bank_transfer" | "adjustment";
   refundReference?: string;
   refundedAmount?: number;
@@ -179,6 +180,7 @@ const SalesReturnSchema = new Schema<ISalesReturn>(
         "REQUESTED",
         "RECEIVED",
         "UNDER_INSPECTION",
+        "APPROVING",
         "APPROVED",
         "REJECTED",
         "RESTOCKED",
@@ -198,7 +200,7 @@ const SalesReturnSchema = new Schema<ISalesReturn>(
     restockedAt: { type: Date },
     refundStatus: {
       type: String,
-      enum: ["NONE", "NOT_APPLICABLE", "PENDING", "REFUNDED", "CREDIT_NOTE_ISSUED", "REJECTED"],
+      enum: ["NONE", "NOT_APPLICABLE", "PENDING", "PROCESSING", "REFUNDED", "CREDIT_NOTE_ISSUED", "REJECTED"],
       default: "NOT_APPLICABLE",
       index: true,
     },

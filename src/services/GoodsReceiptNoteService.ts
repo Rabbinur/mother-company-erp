@@ -15,6 +15,7 @@ import { ProductMatcherService } from "./ProductMatcherService";
 import { GrnCostAllocationService } from "./GrnCostAllocationService";
 import { OcrService } from "@/lib/ocr/OcrService";
 import { generateReferenceCode } from "@/lib/utils";
+import { AccountingService } from "./AccountingService";
 
 export interface CreateGrnInput {
   businessId: string | mongoose.Types.ObjectId;
@@ -682,6 +683,21 @@ export class GoodsReceiptNoteService {
         { $inc: { currentPayable: updated.netInvoiceTotal } },
         { session: params.session }
       );
+
+      // Post GL Journal Entry: Dr Inventory (1200), Cr Accounts Payable (2010)
+      try {
+        await AccountingService.recordGrnConfirmation({
+          businessId: updated.businessId,
+          dealershipId: updated.dealershipId,
+          grnId: updated._id as mongoose.Types.ObjectId,
+          grnNumber: updated.grnNumber,
+          landedCostTotal: updated.netInvoiceTotal,
+          postedBy: actId,
+          session: params.session,
+        });
+      } catch (accErr) {
+        console.error("[GoodsReceiptNoteService.verifyGrn] GL posting error:", accErr);
+      }
     }
 
     await AuditLog.create({

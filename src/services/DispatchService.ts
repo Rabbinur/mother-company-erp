@@ -11,6 +11,7 @@ import { SalesReturn } from "@/models/SalesReturn";
 import { AuditLog } from "@/models/AuditLog";
 import { InventoryService } from "./InventoryService";
 import { generateReferenceCode } from "@/lib/utils";
+import { AccountingService } from "./AccountingService";
 
 export interface CreateDispatchInput {
   businessId: string | mongoose.Types.ObjectId;
@@ -548,6 +549,24 @@ export class DispatchService {
           order.fulfillmentStatus = "fulfilled";
           order.orderStatus = "FULFILLED";
           order.fulfilledDate = new Date();
+
+          // Recognize revenue and COGS on actual delivery/fulfillment
+          try {
+            const invoicedAmount = order.grandTotal || (((orderStop as any).deliveredQuantity || 0) * (order.items?.[0]?.unitPrice || 0));
+            const batchCostTotal = (order as any).totalCost || (order.items?.reduce((sum: number, it: any) => sum + ((it.costPrice || it.unitPrice * 0.7) * (it.quantity || 0)), 0)) || 0;
+            await AccountingService.recordSalesFulfillment({
+              businessId: (dispatch as any).businessId || order.businessId,
+              dealershipId: (dispatch as any).dealershipId || order.dealershipId,
+              orderId: order._id as mongoose.Types.ObjectId,
+              orderNumber: order.orderNumber,
+              invoicedAmount,
+              batchCostTotal,
+              postedBy: actId,
+              session: input.session,
+            });
+          } catch (accErr) {
+            console.error("[DispatchService.recordDeliveries] GL posting error:", accErr);
+          }
         } else if (stopInput.status === "partially_delivered") {
           order.fulfillmentStatus = "partially_fulfilled";
           order.orderStatus = "PARTIALLY_FULFILLED";

@@ -4,9 +4,11 @@ export type PurchaseReturnStatus =
   | "DRAFT"
   | "SUBMITTED"
   | "APPROVED"
+  | "DISPATCHING"
   | "DISPATCHED"
   | "SUPPLIER_ACKNOWLEDGED"
   | "CREDIT_NOTE_RECEIVED"
+  | "SETTLING"
   | "SETTLED"
   | "REJECTED"
   | "CANCELLED"
@@ -144,9 +146,11 @@ const PurchaseReturnSchema = new Schema<IPurchaseReturn>(
         "DRAFT",
         "SUBMITTED",
         "APPROVED",
+        "DISPATCHING",
         "DISPATCHED",
         "SUPPLIER_ACKNOWLEDGED",
         "CREDIT_NOTE_RECEIVED",
+        "SETTLING",
         "SETTLED",
         "REJECTED",
         "CANCELLED",
