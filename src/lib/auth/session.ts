@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
-import { verifyToken, TokenPayload } from "./jwt";
-import { Permission, hasPermission } from "./permissions";
+import { verifyToken, type TokenPayload } from "./jwt";
+import { hasPermission, type Permission } from "./permissions";
 import { connectDB } from "../db/connect";
 import { User } from "@/models/User";
 

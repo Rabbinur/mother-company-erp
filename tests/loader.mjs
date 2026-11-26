@@ -6,6 +6,13 @@ const rootDir = process.cwd();
 const srcDir = path.join(rootDir, "src");
 
 export async function resolve(specifier, context, nextResolve) {
+  if (specifier === "next/server") {
+    return {
+      shortCircuit: true,
+      url: pathToFileURL(path.join(rootDir, "node_modules", "next", "server.js")).href,
+    };
+  }
+
   if (specifier.startsWith("@/")) {
     const relativePath = specifier.slice(2);
     const resolvedPath = path.join(srcDir, relativePath);
