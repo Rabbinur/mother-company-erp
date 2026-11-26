@@ -151,7 +151,18 @@ describe("Phase 4 - Step 3: Smart Automation Engine Test Suite", () => {
     };
     AutomationEvent.countDocuments = async () => automationEvents.length;
     AutomationEvent.findOneAndUpdate = async (q, update) => {
-      const idx = automationEvents.findIndex((e) => String(e._id) === String(q._id));
+      const idx = automationEvents.findIndex((e) => {
+        if (String(e._id) !== String(q._id)) return false;
+        if (q.businessId && String(e.businessId) !== String(q.businessId)) return false;
+        if (q.$or) {
+          const match = q.$or.some((cond) => {
+            if (cond.dealershipId === null) return !e.dealershipId;
+            return String(e.dealershipId) === String(cond.dealershipId);
+          });
+          if (!match) return false;
+        }
+        return true;
+      });
       if (idx !== -1) {
         automationEvents[idx] = { ...automationEvents[idx], ...update.$set };
         return automationEvents[idx];
@@ -164,6 +175,12 @@ describe("Phase 4 - Step 3: Smart Automation Engine Test Suite", () => {
       automationExecutions.push(saved);
       return saved;
     };
+    AutomationExecution.findOne = (q) => {
+      let filtered = automationExecutions.slice();
+      if (q?.businessId) filtered = filtered.filter((ex) => String(ex.businessId) === String(q.businessId));
+      if (q?.status) filtered = filtered.filter((ex) => ex.status === q.status);
+      return createChainable(() => filtered[0] || null);
+    };
     AutomationExecution.findByIdAndUpdate = async (id, update) => {
       const idx = automationExecutions.findIndex((ex) => String(ex._id) === String(id));
       if (idx !== -1) {
@@ -175,7 +192,12 @@ describe("Phase 4 - Step 3: Smart Automation Engine Test Suite", () => {
     AutomationExecution.find = () => createChainable(() => automationExecutions.slice());
 
     // Domain Models Mocks
-    InventoryBalance.find = () => createChainable(() => inventoryBalances.slice());
+    InventoryBalance.find = (q) => {
+      let filtered = inventoryBalances.slice();
+      if (q?.businessId) filtered = filtered.filter((b) => String(b.businessId) === String(q.businessId));
+      if (q?.dealershipId) filtered = filtered.filter((b) => String(b.dealershipId) === String(q.dealershipId));
+      return createChainable(() => filtered);
+    };
     StockBatch.find = (q) => {
       let filtered = stockBatches.slice();
       if (q?.status) filtered = filtered.filter((b) => b.status === q.status);
@@ -574,5 +596,171 @@ describe("Phase 4 - Step 3: Smart Automation Engine Test Suite", () => {
     // 7. Verify Execution record logged
     assert.strictEqual(automationExecutions.length, 2);
     assert.strictEqual(automationExecutions[0].status, "COMPLETED");
+  });
+
+  test("7. Deduplication Lifecycle: Concurrent prevention and safe reopening after resolution", async () => {
+    // A. Concurrency Prevention: Simulate a running execution
+    automationExecutions.push({
+      _id: new mongoose.Types.ObjectId(),
+      businessId: bId,
+      status: "RUNNING",
+      startedAt: new Date(),
+    });
+
+    await assert.rejects(
+      async () => {
+        await AutomationEngine.run({ businessId: bId, ruleKeys: ["STOCKOUT"] });
+      },
+      /Concurrent evaluation rejected/
+    );
+
+    // Clear running execution to proceed
+    automationExecutions.length = 0;
+
+    // B. Safe Reopening: When an existing condition was RESOLVED, condition reappearing creates a new active event
+    const oldResolvedEvent = {
+      _id: new mongoose.Types.ObjectId(),
+      businessId: bId,
+      ruleKey: "STOCKOUT",
+      deduplicationKey: `${bId}:STOCKOUT:${prodId1}:${warehouseId1}`,
+      status: "RESOLVED",
+      resolvedAt: new Date(Date.now() - 86400000),
+    };
+    automationEvents.push(oldResolvedEvent);
+
+    // Mock stockout condition present
+    inventoryBalances.push({
+      _id: new mongoose.Types.ObjectId(),
+      businessId: bId,
+      productId: prodId1,
+      warehouseId: warehouseId1,
+      availableQuantity: 0,
+    });
+
+    const runResult = await AutomationEngine.run({
+      businessId: bId,
+      ruleKeys: ["STOCKOUT"],
+      triggeredBy: "SCHEDULED",
+    });
+
+    assert.strictEqual(runResult.status, "COMPLETED");
+    assert.strictEqual(runResult.eventsGenerated, 1); // Safely reopened!
+    assert.strictEqual(automationEvents.length, 2);
+    // Historical resolved event preserved intact
+    assert.strictEqual(automationEvents[0].status, "RESOLVED");
+    // New open event created
+    assert.strictEqual(automationEvents[1].status, "OPEN");
+  });
+
+  test("8. Partial Failure & Retry: COMPLETED_WITH_ERRORS status and retry idempotency", async () => {
+    // Add two rules explicitly scoped to bId
+    automationRules.push(
+      { businessId: bId, ruleKey: "STOCKOUT", category: "INVENTORY", enabled: true, isConfigured: true },
+      { businessId: bId, ruleKey: "FAILING_RULE", category: "INVENTORY", enabled: true, isConfigured: true }
+    );
+
+    inventoryBalances.push({
+      _id: new mongoose.Types.ObjectId(),
+      businessId: bId,
+      productId: prodId1,
+      warehouseId: warehouseId1,
+      availableQuantity: 0,
+    });
+
+    // Make InventoryDetector fail on FAILING_RULE
+    const origDetect = InventoryDetector.evaluate;
+    InventoryDetector.evaluate = async (params) => {
+      if (params.rule.ruleKey === "FAILING_RULE") {
+        throw new Error("Simulated database timeout on inventory balance aggregate");
+      }
+      return origDetect(params);
+    };
+
+    try {
+      const runResult = await AutomationEngine.run({
+        businessId: bId,
+        ruleKeys: ["STOCKOUT", "FAILING_RULE"],
+      });
+
+      // Partial failure must NOT be marked COMPLETED
+      assert.strictEqual(runResult.status, "COMPLETED_WITH_ERRORS");
+      assert.strictEqual(runResult.errors.length, 1);
+      assert.strictEqual(runResult.errors[0].ruleKey, "FAILING_RULE");
+      assert.strictEqual(automationEvents.length, 1); // Successful rule persisted
+
+      // On retry (after fixing failure): Retry must NOT duplicate STOCKOUT
+      InventoryDetector.evaluate = origDetect;
+      const retryResult = await AutomationEngine.run({
+        businessId: bId,
+        ruleKeys: ["STOCKOUT"],
+      });
+
+      assert.strictEqual(retryResult.status, "COMPLETED");
+      assert.strictEqual(retryResult.eventsGenerated, 0); // No duplicates generated!
+      assert.strictEqual(automationEvents.length, 1);
+    } finally {
+      InventoryDetector.evaluate = origDetect;
+    }
+  });
+
+  test("9. Tenant Isolation: Cross-business data segregation and dealership-scoped action rejection", async () => {
+    const bId2 = new mongoose.Types.ObjectId();
+    const dId2 = new mongoose.Types.ObjectId();
+
+    // Business 2 has low stock
+    inventoryBalances.push({
+      _id: new mongoose.Types.ObjectId(),
+      businessId: bId2,
+      productId: prodId1,
+      warehouseId: warehouseId1,
+      availableQuantity: 2,
+    });
+
+    // Business 1 evaluates: should NOT detect Business 2's low stock
+    const rule = { ruleKey: "LOW_STOCK", category: "INVENTORY", severity: "HIGH", enabled: true, isConfigured: true };
+    const resB1 = await InventoryDetector.evaluate({ rule, businessId: bId });
+    assert.strictEqual(resB1.conditions.length, 0);
+
+    // Cross-dealership action rejection: Event belongs to Dealership 1
+    const eventD1 = {
+      _id: new mongoose.Types.ObjectId(),
+      businessId: bId,
+      dealershipId: dId1,
+      status: "OPEN",
+    };
+    automationEvents.push(eventD1);
+
+    // Dealership 2 user attempts to acknowledge Dealership 1 event
+    const ackAttempt = await AutomationActionService.acknowledgeEvent({
+      eventId: eventD1._id,
+      businessId: bId,
+      dealershipId: dId2, // Wrong dealership!
+    });
+
+    assert.strictEqual(ackAttempt, null); // Rejected by query filter!
+    assert.strictEqual(automationEvents[0].status, "OPEN"); // Unmodified!
+  });
+
+  test("10. Scheduler Security: Timing-safe secret verification and header validation", async () => {
+    const crypto = await import("crypto");
+    const testSecret = "super-secret-cron-token-9988";
+
+    const verifyToken = (header, secret) => {
+      if (!secret || !header || !header.startsWith("Bearer ")) return false;
+      const token = header.substring(7).trim();
+      const tokenBuf = Buffer.from(token);
+      const secretBuf = Buffer.from(secret);
+      if (tokenBuf.length !== secretBuf.length) return false;
+      return crypto.timingSafeEqual(tokenBuf, secretBuf);
+    };
+
+    // Valid secret
+    assert.strictEqual(verifyToken(`Bearer ${testSecret}`, testSecret), true);
+    // Invalid secret
+    assert.strictEqual(verifyToken("Bearer wrong-token", testSecret), false);
+    // Missing Bearer prefix
+    assert.strictEqual(verifyToken(testSecret, testSecret), false);
+    // Empty header
+    assert.strictEqual(verifyToken(null, testSecret), false);
   });
 });

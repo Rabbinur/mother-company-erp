@@ -15,6 +15,19 @@ export class AutomationEngine {
     const executionKey = `EXEC-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
     const startedAt = new Date();
 
+    // Concurrency Prevention: Reject if an evaluation is already actively running for this business
+    if (!dryRun) {
+      const activeExecution = await AutomationExecution.findOne({
+        businessId: bId,
+        status: "RUNNING",
+        startedAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) },
+      }).lean();
+
+      if (activeExecution) {
+        throw new Error("Concurrent evaluation rejected: An automation evaluation is already in progress for this business.");
+      }
+    }
+
     let executionRecord: any = null;
     if (!dryRun) {
       executionRecord = await AutomationExecution.create({
@@ -82,7 +95,10 @@ export class AutomationEngine {
     }
 
     const completedAt = new Date();
-    const status = errors.length > 0 && rulesEvaluated === 0 ? "FAILED" : "COMPLETED";
+    let status: "RUNNING" | "COMPLETED" | "FAILED" | "COMPLETED_WITH_ERRORS" = "COMPLETED";
+    if (errors.length > 0) {
+      status = rulesEvaluated === 0 ? "FAILED" : "COMPLETED_WITH_ERRORS";
+    }
 
     if (executionRecord) {
       await AutomationExecution.findByIdAndUpdate(executionRecord._id, {

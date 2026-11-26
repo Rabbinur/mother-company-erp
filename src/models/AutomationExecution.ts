@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
 
 export type AutomationTriggerSource = "SCHEDULED" | "MANUAL" | "EVENT";
-export type AutomationExecutionStatus = "RUNNING" | "COMPLETED" | "FAILED";
+export type AutomationExecutionStatus = "RUNNING" | "COMPLETED" | "FAILED" | "COMPLETED_WITH_ERRORS";
 
 export interface IAutomationExecution extends Document {
   businessId: mongoose.Types.ObjectId;
@@ -34,7 +34,7 @@ const AutomationExecutionSchema = new Schema<IAutomationExecution>(
     },
     status: {
       type: String,
-      enum: ["RUNNING", "COMPLETED", "FAILED"],
+      enum: ["RUNNING", "COMPLETED", "FAILED", "COMPLETED_WITH_ERRORS"],
       default: "RUNNING",
       index: true,
     },

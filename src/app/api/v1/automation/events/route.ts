@@ -18,7 +18,16 @@ export async function GET(req: NextRequest) {
     const businessId = user.businessId || searchParams.get("businessId");
     if (!businessId) return errorResponse("Business context required", 400);
 
-    const dealershipId = searchParams.get("dealershipId") || undefined;
+    const isExecutive =
+      user.role === "super_admin" ||
+      user.role === "owner" ||
+      user.role === "admin" ||
+      user.role === "business_owner";
+
+    let dealershipId = searchParams.get("dealershipId") || undefined;
+    if (!isExecutive && user.dealershipId) {
+      dealershipId = String(user.dealershipId);
+    }
     const status = (searchParams.get("status") as any) || undefined;
     const category = searchParams.get("category") || undefined;
     const severity = searchParams.get("severity") || undefined;

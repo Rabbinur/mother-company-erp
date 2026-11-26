@@ -22,9 +22,9 @@ export class CustomerDetector {
     const accounts = await CustomerDealershipAccount.find(baseFilter).lean();
     const evaluatedCount = accounts.length;
 
-    // Resolve customer names
+    // Resolve customer names (scoped to businessId)
     const custIds = Array.from(new Set(accounts.map((a) => String(a.customerId))));
-    const customers = await Customer.find({ _id: { $in: custIds } }).lean();
+    const customers = await Customer.find({ _id: { $in: custIds }, businessId }).lean();
     const custMap = new Map(customers.map((c) => [String(c._id), c.name || "Customer"]));
 
     const now = new Date();

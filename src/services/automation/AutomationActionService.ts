@@ -6,15 +6,21 @@ export class AutomationActionService {
   static async acknowledgeEvent(params: {
     eventId: string | mongoose.Types.ObjectId;
     businessId: string | mongoose.Types.ObjectId;
+    dealershipId?: string | mongoose.Types.ObjectId;
     userId?: string | mongoose.Types.ObjectId;
   }): Promise<IAutomationEvent | null> {
-    const { eventId, businessId, userId } = params;
+    const { eventId, businessId, dealershipId, userId } = params;
+    const filter: Record<string, any> = {
+      _id: new mongoose.Types.ObjectId(String(eventId)),
+      businessId: new mongoose.Types.ObjectId(String(businessId)),
+      status: "OPEN",
+    };
+    if (dealershipId) {
+      filter.$or = [{ dealershipId: new mongoose.Types.ObjectId(String(dealershipId)) }, { dealershipId: null }];
+    }
+
     return AutomationEvent.findOneAndUpdate(
-      {
-        _id: new mongoose.Types.ObjectId(String(eventId)),
-        businessId: new mongoose.Types.ObjectId(String(businessId)),
-        status: "OPEN",
-      },
+      filter,
       {
         $set: {
           status: "ACKNOWLEDGED",
@@ -29,15 +35,21 @@ export class AutomationActionService {
   static async resolveEvent(params: {
     eventId: string | mongoose.Types.ObjectId;
     businessId: string | mongoose.Types.ObjectId;
+    dealershipId?: string | mongoose.Types.ObjectId;
     userId?: string | mongoose.Types.ObjectId;
   }): Promise<IAutomationEvent | null> {
-    const { eventId, businessId, userId } = params;
+    const { eventId, businessId, dealershipId, userId } = params;
+    const filter: Record<string, any> = {
+      _id: new mongoose.Types.ObjectId(String(eventId)),
+      businessId: new mongoose.Types.ObjectId(String(businessId)),
+      status: { $in: ["OPEN", "ACKNOWLEDGED"] },
+    };
+    if (dealershipId) {
+      filter.$or = [{ dealershipId: new mongoose.Types.ObjectId(String(dealershipId)) }, { dealershipId: null }];
+    }
+
     return AutomationEvent.findOneAndUpdate(
-      {
-        _id: new mongoose.Types.ObjectId(String(eventId)),
-        businessId: new mongoose.Types.ObjectId(String(businessId)),
-        status: { $in: ["OPEN", "ACKNOWLEDGED"] },
-      },
+      filter,
       {
         $set: {
           status: "RESOLVED",
@@ -52,15 +64,21 @@ export class AutomationActionService {
   static async dismissEvent(params: {
     eventId: string | mongoose.Types.ObjectId;
     businessId: string | mongoose.Types.ObjectId;
+    dealershipId?: string | mongoose.Types.ObjectId;
     userId?: string | mongoose.Types.ObjectId;
   }): Promise<IAutomationEvent | null> {
-    const { eventId, businessId, userId } = params;
+    const { eventId, businessId, dealershipId, userId } = params;
+    const filter: Record<string, any> = {
+      _id: new mongoose.Types.ObjectId(String(eventId)),
+      businessId: new mongoose.Types.ObjectId(String(businessId)),
+      status: { $in: ["OPEN", "ACKNOWLEDGED"] },
+    };
+    if (dealershipId) {
+      filter.$or = [{ dealershipId: new mongoose.Types.ObjectId(String(dealershipId)) }, { dealershipId: null }];
+    }
+
     return AutomationEvent.findOneAndUpdate(
-      {
-        _id: new mongoose.Types.ObjectId(String(eventId)),
-        businessId: new mongoose.Types.ObjectId(String(businessId)),
-        status: { $in: ["OPEN", "ACKNOWLEDGED"] },
-      },
+      filter,
       {
         $set: {
           status: "DISMISSED",

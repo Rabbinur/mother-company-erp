@@ -3,8 +3,14 @@ import { Notification } from "@/models/Notification";
 import type { IAutomationEvent } from "@/models/AutomationEvent";
 
 export class AutomationNotificationService {
+  /**
+   * Enterprise Notification Severity Policy:
+   * Only HIGH and CRITICAL alerts generate internal Notification inbox records.
+   * Routine MEDIUM and LOW informational reminders are recorded in AutomationEvent
+   * and displayed on the Smart Automation Dashboard (/automation) to avoid
+   * alert fatigue in the primary notification bell. No external email/SMS is dispatched.
+   */
   static async dispatchNotification(event: IAutomationEvent): Promise<void> {
-    // Only dispatch system notifications for HIGH and CRITICAL alerts
     if (event.severity !== "HIGH" && event.severity !== "CRITICAL") {
       return;
     }

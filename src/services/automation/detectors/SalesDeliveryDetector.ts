@@ -21,6 +21,9 @@ export class SalesDeliveryDetector {
     const baseFilter: Record<string, any> = { businessId };
     if (dealershipId) baseFilter.dealershipId = dealershipId;
 
+    const dispatchFilter: Record<string, any> = { businessId };
+    if (dealershipId) dispatchFilter.dealershipIds = dealershipId;
+
     let evaluatedCount = 0;
 
     if (ruleKey === "UNFULFILLED_ORDER_OVERDUE") {
@@ -52,7 +55,7 @@ export class SalesDeliveryDetector {
       }
     } else if (ruleKey === "DISPATCH_UNRESOLVED_STOPS") {
       const dispatches = await Dispatch.find({
-        ...baseFilter,
+        ...dispatchFilter,
         status: { $in: ["IN_TRANSIT", "PARTIALLY_DELIVERED", "DELIVERY_FAILED"] },
       }).lean();
       evaluatedCount = dispatches.length;
@@ -82,7 +85,7 @@ export class SalesDeliveryDetector {
       const cutoff = new Date(now.getTime() - hoursThreshold * 3600000);
 
       const dispatches = await Dispatch.find({
-        ...baseFilter,
+        ...dispatchFilter,
         status: { $in: ["DELIVERED", "PARTIALLY_DELIVERED"] },
         updatedAt: { $lte: cutoff },
       }).lean();
@@ -107,7 +110,7 @@ export class SalesDeliveryDetector {
       }
     } else if (ruleKey === "DAY_END_DELIVERY_RECONCILIATION_PENDING") {
       const activeDispatches = await Dispatch.find({
-        ...baseFilter,
+        ...dispatchFilter,
         status: { $in: ["PARTIALLY_DELIVERED", "DELIVERED", "RETURNED"] },
       }).lean();
       evaluatedCount = activeDispatches.length;

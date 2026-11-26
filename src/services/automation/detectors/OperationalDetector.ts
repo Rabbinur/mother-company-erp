@@ -29,12 +29,14 @@ export class OperationalDetector {
 
     const baseFilter: Record<string, any> = { businessId };
     if (dealershipId) baseFilter.dealershipId = dealershipId;
+    const dispatchFilter: Record<string, any> = { businessId };
+    if (dealershipId) dispatchFilter.dealershipIds = dealershipId;
     let evaluatedCount = 0;
 
     if (ruleKey === "DELIVERY_EXPENSE_SETTLEMENT_PENDING") {
       // Check dispatches with pending expense reimbursement claims
       const dispatches = await Dispatch.find({
-        ...baseFilter,
+        ...dispatchFilter,
         "expenses.reimbursementStatus": "pending_claim",
       }).lean();
       evaluatedCount += dispatches.length;

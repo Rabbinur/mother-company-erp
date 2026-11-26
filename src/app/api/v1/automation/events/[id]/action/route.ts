@@ -24,23 +24,34 @@ export async function POST(
     const businessId = user.businessId || body.businessId;
     if (!businessId) return errorResponse("Business context required", 400);
 
+    const isExecutive =
+      user.role === "super_admin" ||
+      user.role === "owner" ||
+      user.role === "admin" ||
+      user.role === "business_owner";
+
+    const dealershipId = !isExecutive && user.dealershipId ? String(user.dealershipId) : undefined;
+
     let updatedEvent = null;
     if (action === "ACKNOWLEDGE") {
       updatedEvent = await AutomationActionService.acknowledgeEvent({
         eventId: id,
         businessId,
+        dealershipId,
         userId: user.userId,
       });
     } else if (action === "RESOLVE") {
       updatedEvent = await AutomationActionService.resolveEvent({
         eventId: id,
         businessId,
+        dealershipId,
         userId: user.userId,
       });
     } else if (action === "DISMISS") {
       updatedEvent = await AutomationActionService.dismissEvent({
         eventId: id,
         businessId,
+        dealershipId,
         userId: user.userId,
       });
     } else {

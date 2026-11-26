@@ -125,7 +125,7 @@ export class SupplierDetector {
         if (stats.challanQty > 0) {
           const rate = (stats.shortageQty / stats.challanQty) * 100;
           if (rate > threshold) {
-            const vendor = await Vendor.findById(vId).lean();
+            const vendor = await Vendor.findOne({ _id: vId, businessId }).lean();
             const vName = vendor?.name || "Supplier";
             conditions.push({
               ruleKey,

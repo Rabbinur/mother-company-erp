@@ -24,9 +24,9 @@ export class InventoryDetector {
       const balances = await InventoryBalance.find(baseFilter).lean();
       evaluatedCount = balances.length;
 
-      // Fetch products to compare with minStock
+      // Fetch products to compare with minStock (scoped to businessId)
       const productIds = Array.from(new Set(balances.map((b) => String(b.productId))));
-      const products = await Product.find({ _id: { $in: productIds } }).lean();
+      const products = await Product.find({ _id: { $in: productIds }, businessId }).lean();
       const productMap = new Map(products.map((p) => [String(p._id), p]));
 
       for (const bal of balances) {
