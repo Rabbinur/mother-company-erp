@@ -60,6 +60,7 @@ export interface IAccount extends Document {
   balance: number;
   currency: string;
   isSystem: boolean;
+  isSharedTreasury?: boolean;
   status: "active" | "inactive";
   description?: string;
   createdAt: Date;
@@ -117,6 +118,7 @@ const AccountSchema = new Schema<IAccount>(
     balance: { type: Number, default: 0 },
     currency: { type: String, default: "BDT" },
     isSystem: { type: Boolean, default: false },
+    isSharedTreasury: { type: Boolean, default: false, index: true },
     status: {
       type: String,
       enum: ["active", "inactive"],
@@ -128,8 +130,16 @@ const AccountSchema = new Schema<IAccount>(
   { timestamps: true }
 );
 
-// Auto-align category, type, and normalBalance
+// Auto-align category, type, and normalBalance, and enforce safe monetary precision
 AccountSchema.pre("validate", function () {
+  if (this.balance !== undefined && this.balance !== null) {
+    this.balance = Math.round((Number(this.balance) || 0) * 100) / 100;
+    const bMinor = Math.round(this.balance * 100);
+    if (!Number.isSafeInteger(bMinor)) {
+      throw new Error(`Monetary precision overflow: account balance exceeds safe integer boundary (${this.balance})`);
+    }
+  }
+
   if (!this.category) {
     const t = String(this.type).toUpperCase();
     if (t === "ASSET") this.category = "ASSET";

@@ -41,3 +41,4 @@ export * from "./Vehicle";
 export * from "./Dispatch";
 export * from "./Claim";
 export * from "./AccountingPeriod";
+export * from "./BankReconciliation";

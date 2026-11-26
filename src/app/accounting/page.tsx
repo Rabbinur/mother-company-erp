@@ -12,6 +12,9 @@ import {
   ProfitLossData,
   BalanceSheetData,
   LedgerStatementData,
+  ArAgingReportResult,
+  ApAgingReportResult,
+  CashBankReconciliationResult,
   AccountingHeader,
   AccountingKpiCards,
   ChartOfAccountsTable,
@@ -39,6 +42,9 @@ export default function AccountingPage() {
   const [profitLoss, setProfitLoss] = useState<ProfitLossData | null>(null);
   const [balanceSheet, setBalanceSheet] = useState<BalanceSheetData | null>(null);
   const [ledgerStatement, setLedgerStatement] = useState<LedgerStatementData | null>(null);
+  const [arAging, setArAging] = useState<ArAgingReportResult | null>(null);
+  const [apAging, setApAging] = useState<ApAgingReportResult | null>(null);
+  const [cashBankRec, setCashBankRec] = useState<CashBankReconciliationResult | null>(null);
   const [selectedLedgerAccountId, setSelectedLedgerAccountId] = useState<string>("");
 
   // Modal Open States
@@ -74,6 +80,24 @@ export default function AccountingPage() {
         const res = await fetch(`/api/v1/accounting/reports/ledger?accountId=${accId}`);
         const json = await res.json();
         if (json.success) setLedgerStatement(json.data);
+      }
+
+      if (reportType === "ar-aging" || tab === "reports") {
+        const res = await fetch("/api/v1/accounting/reports/ar-aging");
+        const json = await res.json();
+        if (json.success) setArAging(json.data);
+      }
+
+      if (reportType === "ap-aging" || tab === "reports") {
+        const res = await fetch("/api/v1/accounting/reports/ap-aging");
+        const json = await res.json();
+        if (json.success) setApAging(json.data);
+      }
+
+      if (reportType === "cash-bank-reconciliation" || tab === "reports") {
+        const res = await fetch("/api/v1/accounting/reports/cash-bank-reconciliation");
+        const json = await res.json();
+        if (json.success) setCashBankRec(json.data);
       }
     } catch (err: any) {
       console.error("Report fetch error:", err);
@@ -260,6 +284,31 @@ export default function AccountingPage() {
     fetchReports(accountId);
   };
 
+  const handleRecordReconciliation = async (
+    accountId: string,
+    statementEndingBalance: number,
+    notes?: string
+  ) => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/v1/accounting/reports/cash-bank-reconciliation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId, statementEndingBalance, notes }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.message || "Failed to record reconciliation statement");
+      }
+      setSuccessMsg("Reconciliation statement recorded successfully.");
+      await fetchReports();
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-12">
       {/* 1. Header with navigation tabs & primary action triggers */}
@@ -335,9 +384,13 @@ export default function AccountingPage() {
           profitLoss={profitLoss}
           balanceSheet={balanceSheet}
           ledgerStatement={ledgerStatement}
+          arAging={arAging}
+          apAging={apAging}
+          cashBankReconciliation={cashBankRec}
           accounts={accounts}
           selectedLedgerAccountId={selectedLedgerAccountId}
           onSelectLedgerAccountId={handleSelectLedgerAccount}
+          onRecordBankReconciliation={handleRecordReconciliation}
           isLoading={loading}
         />
       )}

@@ -1,16 +1,18 @@
 import mongoose from "mongoose";
-import { Payment, IPayment, IPaymentAllocation } from "@/models/Payment";
+import { Payment, type IPayment, type IPaymentAllocation } from "@/models/Payment";
 import { Customer } from "@/models/Customer";
 import { Vendor } from "@/models/Vendor";
 import { Order } from "@/models/Order";
 import { Purchase } from "@/models/Purchase";
 import { Account } from "@/models/Account";
+import { CustomerDealershipAccount } from "@/models/CustomerDealershipAccount";
 import { AccountingService } from "./AccountingService";
 import { AuditService } from "./AuditService";
 import { generateReferenceCode } from "@/lib/utils";
 
 export interface RecordCustomerPaymentInput {
   customerId: string | mongoose.Types.ObjectId;
+  dealershipId?: string | mongoose.Types.ObjectId;
   accountId: string | mongoose.Types.ObjectId;
   amount: number;
   paymentMethod: "cash" | "bank_transfer" | "bkash" | "nagad" | "rocket" | "other";
@@ -110,8 +112,22 @@ export class PaymentService {
             referenceNumber: order.orderNumber,
             amountAllocated: allocAmount,
           });
+
+          // Reduce customer balance in dealership subledger
+          if (order.dealershipId) {
+            await CustomerDealershipAccount.findOneAndUpdate(
+              { customerId: cId, dealershipId: order.dealershipId, isDeleted: false },
+              { $inc: { currentBalance: -allocAmount } }
+            );
+          }
         }
       }
+    } else if (input.dealershipId) {
+      // Unallocated payment directed to specific dealership
+      await CustomerDealershipAccount.findOneAndUpdate(
+        { customerId: cId, dealershipId: new mongoose.Types.ObjectId(String(input.dealershipId)), isDeleted: false },
+        { $inc: { currentBalance: -amount } }
+      );
     }
 
     // Update Customer Receivable

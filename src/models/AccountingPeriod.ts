@@ -7,6 +7,7 @@ export interface IAccountingPeriod extends Document {
   startDate: Date;
   endDate: Date;
   status: "OPEN" | "CLOSED";
+  journalCount?: number;
   closedAt?: Date;
   closedBy?: mongoose.Types.ObjectId;
   closingNotes?: string;
@@ -49,6 +50,7 @@ const AccountingPeriodSchema = new Schema<IAccountingPeriod>(
       default: "OPEN",
       index: true,
     },
+    journalCount: { type: Number, default: 0 },
     closedAt: { type: Date },
     closedBy: { type: Schema.Types.ObjectId, ref: "User" },
     closingNotes: { type: String, trim: true },

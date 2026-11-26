@@ -1,5 +1,12 @@
 export type AccountingTab = "overview" | "chart" | "journals" | "periods" | "reports";
-export type FinancialReportType = "trial-balance" | "profit-loss" | "balance-sheet" | "ledger";
+export type FinancialReportType =
+  | "trial-balance"
+  | "profit-loss"
+  | "balance-sheet"
+  | "ledger"
+  | "ar-aging"
+  | "ap-aging"
+  | "cash-bank-reconciliation";
 
 export interface AccountRow {
   _id: string;
@@ -153,4 +160,151 @@ export interface AccountingKpiMetrics {
   revenue: number;
   expense: number;
   netProfit: number;
+}
+
+export interface ArAgingCustomerItem {
+  customerId: string;
+  customerName: string;
+  phone?: string;
+  shopName?: string;
+  dealershipId: string;
+  dealershipName?: string;
+  creditLimit: number;
+  currentBalance: number;
+  current: number;
+  days1_30: number;
+  days31_60: number;
+  days61_90: number;
+  days90Plus: number;
+  oldestInvoiceDate?: string | Date | null;
+  unpaidOrdersCount: number;
+}
+
+export interface ArAgingReportResult {
+  asOfDate: string | Date;
+  businessId?: string;
+  dealershipId?: string;
+  summary: {
+    totalReceivables: number;
+    totalCurrent: number;
+    totalDays1_30: number;
+    totalDays31_60: number;
+    totalDays61_90: number;
+    totalDays90Plus: number;
+    customerCount: number;
+  };
+  reconciliation: {
+    glAccountCode: string;
+    glAccountName: string;
+    glBalance: number;
+    subledgerTotal: number;
+    discrepancy: number;
+    isReconciled: boolean;
+  };
+  customers: ArAgingCustomerItem[];
+}
+
+export interface ApAgingSupplierItem {
+  vendorId: string;
+  vendorName: string;
+  vendorCode?: string;
+  principalCompanyId?: string | null;
+  principalCompanyName?: string | null;
+  dealershipId: string;
+  dealershipName?: string;
+  outstandingBalance: number;
+  current: number;
+  days1_30: number;
+  days31_60: number;
+  days61_90: number;
+  days90Plus: number;
+  oldestInvoiceDate?: string | Date | null;
+  payablesCount: number;
+}
+
+export interface ApAgingReportResult {
+  asOfDate: string | Date;
+  businessId?: string;
+  dealershipId?: string;
+  principalCompanyId?: string;
+  summary: {
+    totalPayables: number;
+    totalCurrent: number;
+    totalDays1_30: number;
+    totalDays31_60: number;
+    totalDays61_90: number;
+    totalDays90Plus: number;
+    vendorCount: number;
+    payablesCount: number;
+  };
+  reconciliation: {
+    glAccountCode: string;
+    glAccountName: string;
+    glBalance: number;
+    subledgerTotal: number;
+    discrepancy: number;
+    isReconciled: boolean;
+  };
+  suppliers: ApAgingSupplierItem[];
+}
+
+export interface CashBankTransactionLine {
+  date: string | Date;
+  journalNumber: string;
+  sourceType: string;
+  sourceId?: string;
+  memo: string;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+}
+
+export interface CashBankAccountReconciliationItem {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  category: string;
+  subType: string;
+  isSharedTreasury: boolean;
+  dealershipId?: string | null;
+  dealershipName?: string;
+  currency: string;
+  openingBalance: number;
+  periodDebits: number;
+  periodCredits: number;
+  closingBalance: number;
+  statementEndingBalance?: number;
+  discrepancy?: number;
+  reconciliationStatus?: "RECONCILED" | "DISCREPANCY" | "UNRECONCILED";
+  transactionsCount: number;
+  transactions?: CashBankTransactionLine[];
+}
+
+export interface CashBankReconciliationResult {
+  businessId?: string;
+  dealershipId?: string;
+  startDate?: string | Date;
+  endDate?: string | Date;
+  sharedTreasury: {
+    accounts: CashBankAccountReconciliationItem[];
+    totalOpening: number;
+    totalDebits: number;
+    totalCredits: number;
+    totalClosing: number;
+  };
+  dealershipTreasury: {
+    accounts: CashBankAccountReconciliationItem[];
+    totalOpening: number;
+    totalDebits: number;
+    totalCredits: number;
+    totalClosing: number;
+  };
+  summary: {
+    totalCashOnHand: number;
+    totalBankBalances: number;
+    totalMfsBalances: number;
+    totalTreasury: number;
+    sharedTreasuryClosing: number;
+    dealershipTreasuryClosing: number;
+  };
 }

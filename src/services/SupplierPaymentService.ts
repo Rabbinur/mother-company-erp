@@ -4,6 +4,7 @@ import { Payment, type IPayment } from "@/models/Payment";
 import { Vendor } from "@/models/Vendor";
 import { AuditLog } from "@/models/AuditLog";
 import { generateReferenceCode } from "@/lib/utils";
+import { AccountingService } from "./AccountingService";
 
 export interface RecordSupplierPaymentInput {
   businessId: string | mongoose.Types.ObjectId;
@@ -203,6 +204,25 @@ export class SupplierPaymentService {
       { $inc: { currentPayable: -totalDeduction } },
       { session: input.session }
     );
+
+    // Double-Entry: Dr Accounts Payable (2010), Cr Cash/Bank (1010/1020)
+    try {
+      await AccountingService.recordSupplierPayment({
+        businessId: bId,
+        dealershipId: dId || undefined,
+        paymentId: payment._id as mongoose.Types.ObjectId,
+        paymentNumber,
+        amount: payAmt,
+        paymentMethod: input.paymentMethod || "bank_transfer",
+        vendorName: payable?.supplierId
+          ? String((payable.supplierId as any).name || (payable.supplierId as any).companyName || "")
+          : undefined,
+        postedBy: actId || undefined,
+        session: input.session,
+      });
+    } catch (accErr) {
+      console.error("[SupplierPaymentService.recordPayment] GL posting error:", accErr);
+    }
 
     if (actId) {
       await AuditLog.create({
