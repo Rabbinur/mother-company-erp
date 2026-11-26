@@ -42,3 +42,6 @@ export * from "./Dispatch";
 export * from "./Claim";
 export * from "./AccountingPeriod";
 export * from "./BankReconciliation";
+export * from "./AutomationRule";
+export * from "./AutomationEvent";
+export * from "./AutomationExecution";

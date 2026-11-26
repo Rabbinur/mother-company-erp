@@ -20,7 +20,7 @@ export class SupplierIntelligenceService {
       principalCompanyName: string;
       totalValue: number;
       totalQuantity: number;
-      shortageRate: number;
+      shortageRate: number | null;
     }>;
   }> {
     const { businessId, dealershipId, principalCompanyId, dateFilter, canViewCosts } = params;
@@ -91,8 +91,13 @@ export class SupplierIntelligenceService {
       if (Array.isArray(grn.items)) {
         for (const item of grn.items) {
           const recQty = item.receivedQuantity || 0;
-          const chalQty = item.challanQuantity || recQty;
-          const shortQty = item.shortageQuantity || Math.max(0, chalQty - recQty);
+          // Handle zero or missing challan quantities: do not fallback to recQty
+          const chalQty = typeof item.challanQuantity === "number" && !isNaN(item.challanQuantity)
+            ? Math.max(0, item.challanQuantity)
+            : 0;
+          const shortQty = typeof item.shortageQuantity === "number" && !isNaN(item.shortageQuantity)
+            ? Math.max(0, item.shortageQuantity)
+            : (chalQty > 0 ? Math.max(0, chalQty - recQty) : 0);
           const lineVal = roundMoney(item.lineTotal || (item.unitPurchasePrice || 0) * recQty);
 
           vEntry.purchasedQty += recQty;

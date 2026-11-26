@@ -12,7 +12,7 @@ interface SupplierIntelligenceTabProps {
     principalCompanyName: string;
     totalValue: number;
     totalQuantity: number;
-    shortageRate: number;
+    shortageRate: number | null;
   }>;
   canViewCosts: boolean;
 }
