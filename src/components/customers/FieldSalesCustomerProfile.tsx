@@ -112,11 +112,15 @@ export function FieldSalesCustomerProfile({ customerId, dealershipId }: { custom
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
         <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
           <span className="text-slate-400 block">Credit Limit</span>
-          <span className="font-mono text-base font-semibold text-slate-200">BDT {profile.dealershipDue.creditLimit.toLocaleString()}</span>
+          <span className="font-mono text-base font-semibold text-slate-200">
+            {profile.dealershipDue.creditLimit > 0 ? `BDT ${profile.dealershipDue.creditLimit.toLocaleString()}` : "Not Configured / Restricted"}
+          </span>
         </div>
         <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
           <span className="text-slate-400 block">Available Credit</span>
-          <span className="font-mono text-base font-semibold text-emerald-400">BDT {profile.dealershipDue.availableCredit.toLocaleString()}</span>
+          <span className="font-mono text-base font-semibold text-emerald-400">
+            {profile.dealershipDue.creditLimit > 0 ? `BDT ${profile.dealershipDue.availableCredit.toLocaleString()}` : "—"}
+          </span>
         </div>
         <div className="rounded-xl border border-amber-900/40 bg-amber-950/20 p-4">
           <span className="text-amber-400 block flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> Pending Verification</span>
@@ -171,7 +175,14 @@ export function FieldSalesCustomerProfile({ customerId, dealershipId }: { custom
                   <tr key={inv.orderId}>
                     <td className="py-2 font-mono font-medium text-slate-200">{inv.orderNumber}</td>
                     <td className="py-2">{new Date(inv.orderDate).toLocaleDateString()}</td>
-                    <td className="py-2">{inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : "—"}</td>
+                    <td className="py-2">
+                      {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : "—"}
+                      {inv.isOverdue && (
+                        <span className="ml-1.5 rounded bg-red-950/60 px-1.5 py-0.5 text-[10px] font-medium text-red-400 border border-red-800/40">
+                          Overdue ({inv.overdueDays}d)
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2 text-right font-mono">BDT {inv.orderTotal.toLocaleString()}</td>
                     <td className="py-2 text-right font-mono">BDT {inv.paidAmount.toLocaleString()}</td>
                     <td className="py-2 text-right font-mono font-bold text-amber-400">BDT {inv.dueAmount.toLocaleString()}</td>

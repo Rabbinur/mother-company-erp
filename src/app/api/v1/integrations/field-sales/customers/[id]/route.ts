@@ -7,6 +7,7 @@ import {
   successResponse,
   errorResponse,
   unauthorizedResponse,
+  forbiddenResponse,
 } from "@/lib/utils/api-response";
 
 export async function GET(
@@ -23,14 +24,22 @@ export async function GET(
   try {
     const { id } = await params;
     const url = req.nextUrl;
+    const requestedDealership = url.searchParams.get("dealershipId") || undefined;
+    let dealershipId = requestedDealership;
 
-    // Derive dealershipId strictly from authenticated user context or verified query
-    let dealershipId = url.searchParams.get("dealershipId") || undefined;
+    // Delivery staff cannot view financial dues or customer credit accounts
+    if (user && (user.role === "deliveryman" || user.role === "delivery_staff")) {
+      return forbiddenResponse("Access denied: Delivery staff cannot access customer dues or credit profiles");
+    }
 
-    // If user is sales staff in ERP session, strictly force their assigned dealership
+    // Strict dealership isolation for sales staff
     if (user && (user.role === "sales_staff" || user.role === "salesman")) {
       if (user.dealershipId) {
-        dealershipId = String(user.dealershipId);
+        const assignedDealership = String(user.dealershipId);
+        if (requestedDealership && requestedDealership !== assignedDealership) {
+          return forbiddenResponse("Access denied: Sales staff cannot query financial or credit records of other dealerships");
+        }
+        dealershipId = assignedDealership;
       }
     }
 
@@ -39,10 +48,12 @@ export async function GET(
     }
 
     await connectDB();
+    const canViewCredit = !user?.permissions || user.permissions.includes("customers.view");
     const profile = await SalesmanCustomerDueService.getSalesmanCustomerDueProfile({
       customerId: id,
       dealershipId,
       salesmanId: user?.userId,
+      canViewCredit,
     });
 
     return successResponse(profile, "Salesman customer due & collection profile retrieved");
