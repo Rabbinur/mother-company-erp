@@ -1,3 +1,4 @@
+import { RateLimit } from "@/models/RateLimit";
 import type {
   ISmsProvider,
   ISmsMessage,
@@ -56,7 +57,7 @@ export class SmsProviderService implements ISmsProvider {
       msg.recipient
     );
 
-    if (!normalizedRecipient || normalizedRecipient.length < 8) {
+    if (!normalizedRecipient || normalizedRecipient.length < 11) {
       return {
         success: false,
         recipient: msg.recipient,
@@ -65,6 +66,7 @@ export class SmsProviderService implements ISmsProvider {
       };
     }
 
+    // Two-tier Idempotency: Memory (L1 fast-check) + MongoDB RateLimit (L2 durable across Vercel instances)
     if (msg.idempotencyKey) {
       if (SmsProviderService.processedKeys.has(msg.idempotencyKey)) {
         return {
@@ -75,6 +77,24 @@ export class SmsProviderService implements ISmsProvider {
         };
       }
       SmsProviderService.processedKeys.add(msg.idempotencyKey);
+
+      try {
+        await RateLimit.create({
+          key: `idemp:sms:${msg.idempotencyKey}`,
+          windowId: 0,
+          hits: 1,
+          expireAt: new Date(Date.now() + 86400000), // 24-hour durable window
+        });
+      } catch (err: any) {
+        if (err?.code === 11000) {
+          return {
+            success: true,
+            recipient: normalizedRecipient,
+            messageId: `dedup-${msg.idempotencyKey}`,
+            status: "SENT",
+          };
+        }
+      }
     }
 
     if (!this.isConfigured()) {
@@ -94,7 +114,7 @@ export class SmsProviderService implements ISmsProvider {
         ? SmsProviderService.renderTemplate(msg.templateId, msg.templateParams)
         : msg.message;
 
-      // When configured in production/live, execute HTTP call
+      // When configured in production/live, execute HTTP call with 5s timeout
       const res = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -106,6 +126,7 @@ export class SmsProviderService implements ISmsProvider {
           recipient: normalizedRecipient,
           text: messageBody,
         }),
+        signal: AbortSignal.timeout(5000),
       });
 
       if (!res.ok) {
@@ -126,8 +147,12 @@ export class SmsProviderService implements ISmsProvider {
         status: "SENT",
       };
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Unknown SMS dispatch error";
+      const isTimeout = err instanceof Error && err.name === "TimeoutError";
+      const message = isTimeout
+        ? "SMS gateway request timed out after 5000ms"
+        : err instanceof Error
+        ? err.message
+        : "Unknown SMS dispatch error";
       return {
         success: false,
         recipient: normalizedRecipient,

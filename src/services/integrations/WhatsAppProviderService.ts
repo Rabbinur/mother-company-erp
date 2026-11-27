@@ -1,3 +1,4 @@
+import { RateLimit } from "@/models/RateLimit";
 import type {
   IWhatsAppProvider,
   IWhatsAppMessage,
@@ -28,7 +29,7 @@ export class WhatsAppProviderService implements IWhatsAppProvider {
     // WhatsApp Cloud API recipient format requires digits only without leading '+'
     const recipientDigits = rawNormalized.replace(/^\+/, "");
 
-    if (!recipientDigits || recipientDigits.length < 8) {
+    if (!recipientDigits || recipientDigits.length < 11) {
       return {
         success: false,
         recipient: msg.recipient,
@@ -37,6 +38,7 @@ export class WhatsAppProviderService implements IWhatsAppProvider {
       };
     }
 
+    // Two-tier Idempotency: Memory (L1 fast-check) + MongoDB RateLimit (L2 durable across Vercel instances)
     if (msg.idempotencyKey) {
       if (WhatsAppProviderService.processedKeys.has(msg.idempotencyKey)) {
         return {
@@ -47,6 +49,24 @@ export class WhatsAppProviderService implements IWhatsAppProvider {
         };
       }
       WhatsAppProviderService.processedKeys.add(msg.idempotencyKey);
+
+      try {
+        await RateLimit.create({
+          key: `idemp:wa:${msg.idempotencyKey}`,
+          windowId: 0,
+          hits: 1,
+          expireAt: new Date(Date.now() + 86400000), // 24-hour durable window
+        });
+      } catch (err: any) {
+        if (err?.code === 11000) {
+          return {
+            success: true,
+            recipient: recipientDigits,
+            messageId: `dedup-${msg.idempotencyKey}`,
+            status: "SENT",
+          };
+        }
+      }
     }
 
     if (!this.isConfigured()) {
@@ -97,6 +117,7 @@ export class WhatsAppProviderService implements IWhatsAppProvider {
           Authorization: `Bearer ${process.env.WHATSAPP_API_TOKEN}`,
         },
         body: JSON.stringify(bodyPayload),
+        signal: AbortSignal.timeout(5000),
       });
 
       if (!res.ok) {
@@ -120,8 +141,12 @@ export class WhatsAppProviderService implements IWhatsAppProvider {
         status: "SENT",
       };
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "WhatsApp dispatch error";
+      const isTimeout = err instanceof Error && err.name === "TimeoutError";
+      const message = isTimeout
+        ? "WhatsApp gateway request timed out after 5000ms"
+        : err instanceof Error
+        ? err.message
+        : "WhatsApp dispatch error";
       return {
         success: false,
         recipient: recipientDigits,

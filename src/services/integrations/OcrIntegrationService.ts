@@ -58,6 +58,7 @@ export class OcrIntegrationService implements IOcrProvider {
               },
             ],
           }),
+          signal: AbortSignal.timeout(5000),
         }
       );
 
@@ -86,8 +87,12 @@ export class OcrIntegrationService implements IOcrProvider {
         lineItems: [],
       };
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "OCR processing error";
+      const isTimeout = err instanceof Error && err.name === "TimeoutError";
+      const message = isTimeout
+        ? "OCR service request timed out after 5000ms"
+        : err instanceof Error
+        ? err.message
+        : "OCR processing error";
       return {
         provider: this.name,
         isConfigured: true,

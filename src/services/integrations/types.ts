@@ -129,12 +129,19 @@ export interface INotificationDeliveryResult {
   errors: string[];
 }
 
+export type ProviderConnectionState =
+  | "UNTESTED"
+  | "VERIFIED"
+  | "ERROR"
+  | "NOT_CONFIGURED";
+
 export interface IIntegrationProviderSummary {
   type: IntegrationProviderType;
   name: string;
   label: string;
   description: string;
   status: IntegrationStatus;
+  connectionState: ProviderConnectionState;
   isConfigured: boolean;
   isEnabled: boolean;
   lastActivityAt?: string;

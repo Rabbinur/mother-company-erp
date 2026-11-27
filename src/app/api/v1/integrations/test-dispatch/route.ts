@@ -28,18 +28,29 @@ export async function POST(req: NextRequest) {
   try {
     await connectDB();
     const body = await req.json();
-    const { channel, recipientPhone, title, message } = body;
+    const { channel, recipientPhone, message } = body;
 
-    if (!recipientPhone && channel !== "in_app") {
-      return errorResponse("recipientPhone is required for SMS/WhatsApp", 400);
+    // Strict Recipient Validation: prevent accidental/malformed numbers
+    if (channel === "sms" || channel === "whatsapp") {
+      if (!recipientPhone || typeof recipientPhone !== "string") {
+        return errorResponse("recipientPhone string is required for SMS/WhatsApp test dispatches", 400);
+      }
+      const digitsOnly = recipientPhone.replace(/[^0-9]/g, "");
+      if (digitsOnly.length < 11 || digitsOnly.length > 15) {
+        return errorResponse("Invalid recipient phone. Must contain 11 to 15 digits (e.g. 01700000000 or +8801700000000)", 400);
+      }
     }
+
+    // Safety: Enforce explicit test prefix to prevent accidental customer misunderstanding
+    const explicitTitle = "[SYSTEM TEST] Integration Connectivity Test";
+    const explicitMessage = `[TEST DISPATCH - ERP ADMIN] ${
+      message ? String(message).slice(0, 80) : "Channel connectivity verified."
+    } Please ignore this automated test message.`;
 
     const result = await ExternalNotificationDispatcher.dispatch({
       businessId: user.businessId ? String(user.businessId) : undefined,
-      title: title || "ERP Test Integration Alert",
-      message:
-        message ||
-        "This is an automated test notification sent from Dealership Management ERP.",
+      title: explicitTitle,
+      message: explicitMessage,
       type: "system",
       targetUserId: user.userId,
       recipientPhone,

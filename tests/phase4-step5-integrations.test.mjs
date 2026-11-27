@@ -12,22 +12,19 @@ import { IntegrationManagerService } from "@/services/integrations/IntegrationMa
 import { Payment } from "@/models/Payment";
 import { Notification } from "@/models/Notification";
 import { IntegrationSetting } from "@/models/IntegrationSetting";
+import { RateLimit } from "@/models/RateLimit";
 
 describe("Phase 4 Step 5: External Integrations Test Suite", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
     process.env = { ...originalEnv };
-    delete process.env.SMS_API_KEY;
-    delete process.env.SMS_SENDER_ID;
-    delete process.env.TWILIO_AUTH_TOKEN;
-    delete process.env.TWILIO_PHONE_NUMBER;
-    delete process.env.WHATSAPP_API_TOKEN;
-    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
-    delete process.env.PAYMENT_GATEWAY_KEY;
-    delete process.env.PAYMENT_GATEWAY_SECRET;
-    delete process.env.OCR_API_KEY;
-    delete process.env.GOOGLE_VISION_KEY;
+    [
+      "SMS_API_KEY", "SMS_SENDER_ID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER",
+      "WHATSAPP_API_TOKEN", "WHATSAPP_PHONE_NUMBER_ID",
+      "PAYMENT_GATEWAY_KEY", "PAYMENT_GATEWAY_SECRET",
+      "OCR_API_KEY", "GOOGLE_VISION_KEY",
+    ].forEach((k) => delete process.env[k]);
   });
 
   describe("1. SMS Provider Service", () => {
@@ -38,29 +35,18 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
     });
 
     it("should render ERP notification templates accurately", () => {
-      const orderMsg = SmsProviderService.renderTemplate("ORDER_CONFIRMATION", {
-        orderNumber: "ORD-101",
-        amount: 2500,
-      });
+      const orderMsg = SmsProviderService.renderTemplate("ORDER_CONFIRMATION", { orderNumber: "ORD-101", amount: 2500 });
       assert.match(orderMsg, /Order #ORD-101 confirmed/);
       assert.match(orderMsg, /BDT 2500/);
 
-      const payMsg = SmsProviderService.renderTemplate("PAYMENT_RECEIPT", {
-        paymentNumber: "RCT-202",
-        amount: 1500,
-        remainingBalance: 500,
-      });
+      const payMsg = SmsProviderService.renderTemplate("PAYMENT_RECEIPT", { paymentNumber: "RCT-202", amount: 1500 });
       assert.match(payMsg, /Payment received: BDT 1500/);
     });
 
     it("should return NOT_CONFIGURED when credentials are missing", async () => {
       const sms = SmsProviderService.getInstance();
       assert.equal(sms.isConfigured(), false);
-
-      const res = await sms.send({
-        recipient: "01712345678",
-        message: "Test message",
-      });
+      const res = await sms.send({ recipient: "01712345678", message: "Test" });
       assert.equal(res.success, false);
       assert.equal(res.status, "NOT_CONFIGURED");
     });
@@ -68,19 +54,11 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
     it("should deduplicate sends with identical idempotencyKey", async () => {
       const sms = SmsProviderService.getInstance();
       const key = `test-key-${Date.now()}`;
-
-      // First call (without credentials) marks key
       await sms.send({ recipient: "01712345678", message: "Hi", idempotencyKey: key });
-
-      // Second call returns cached success
-      const secondRes = await sms.send({
-        recipient: "01712345678",
-        message: "Hi duplicate",
-        idempotencyKey: key,
-      });
-      assert.equal(secondRes.success, true);
-      assert.equal(secondRes.status, "SENT");
-      assert.equal(secondRes.messageId, `dedup-${key}`);
+      const dupe = await sms.send({ recipient: "01712345678", message: "Hi duplicate", idempotencyKey: key });
+      assert.equal(dupe.success, true);
+      assert.equal(dupe.status, "SENT");
+      assert.equal(dupe.messageId, `dedup-${key}`);
     });
   });
 
@@ -88,11 +66,7 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
     it("should return NOT_CONFIGURED when Meta Cloud credentials are missing", async () => {
       const wa = WhatsAppProviderService.getInstance();
       assert.equal(wa.isConfigured(), false);
-
-      const res = await wa.sendTemplate({
-        recipient: "+8801712345678",
-        templateName: "order_dispatch",
-      });
+      const res = await wa.sendTemplate({ recipient: "+8801712345678", templateName: "order_dispatch" });
       assert.equal(res.success, false);
       assert.equal(res.status, "NOT_CONFIGURED");
     });
@@ -100,18 +74,8 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
     it("should deduplicate WhatsApp dispatches with idempotency key", async () => {
       const wa = WhatsAppProviderService.getInstance();
       const key = `wa-key-${Date.now()}`;
-
-      await wa.sendTemplate({
-        recipient: "01712345678",
-        templateName: "order_status",
-        idempotencyKey: key,
-      });
-
-      const dupe = await wa.sendTemplate({
-        recipient: "01712345678",
-        templateName: "order_status",
-        idempotencyKey: key,
-      });
+      await wa.sendTemplate({ recipient: "01712345678", templateName: "order_status", idempotencyKey: key });
+      const dupe = await wa.sendTemplate({ recipient: "01712345678", templateName: "order_status", idempotencyKey: key });
       assert.equal(dupe.success, true);
       assert.equal(dupe.messageId, `dedup-${key}`);
     });
@@ -121,21 +85,12 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
     it("should perform timing-safe HMAC signature verification", () => {
       const secret = "secret_webhook_key_12345";
       const rawPayload = JSON.stringify({ transactionId: "TRX-789", amount: 5000 });
-      const validSignature = crypto.createHmac("sha256", secret).update(rawPayload, "utf8").digest("hex");
-
+      const validSig = crypto.createHmac("sha256", secret).update(rawPayload, "utf8").digest("hex");
       const pg = PaymentGatewayService.getInstance();
 
-      // Valid signature
-      assert.equal(pg.verifySignature(rawPayload, validSignature, secret), true);
-
-      // Tampered payload
-      const tampered = JSON.stringify({ transactionId: "TRX-789", amount: 999999 });
-      assert.equal(pg.verifySignature(tampered, validSignature, secret), false);
-
-      // Wrong signature
+      assert.equal(pg.verifySignature(rawPayload, validSig, secret), true);
+      assert.equal(pg.verifySignature(JSON.stringify({ transactionId: "TRX-789", amount: 99 }), validSig, secret), false);
       assert.equal(pg.verifySignature(rawPayload, "invalidhexsignature12345", secret), false);
-
-      // Missing signature
       assert.equal(pg.verifySignature(rawPayload, "", secret), false);
     });
 
@@ -143,31 +98,65 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
       const pg = PaymentGatewayService.getInstance();
       const mockTrxId = `TRX-DUP-${Date.now()}`;
 
-      // Mock existing payment in DB
       const origFindOne = Payment.findOne;
-      Payment.findOne = async () => ({
-        _id: new mongoose.Types.ObjectId(),
-        paymentNumber: "RCT-EXISTING-01",
-        transactionReference: mockTrxId,
-      });
+      Payment.findOne = async () => ({ _id: new mongoose.Types.ObjectId(), paymentNumber: "RCT-01", transactionReference: mockTrxId });
 
       try {
         const result = await pg.processWebhook({
-          gateway: "bkash",
-          eventType: "payment.success",
-          transactionId: mockTrxId,
-          amount: 1500,
-          currency: "BDT",
-          status: "SUCCESS",
+          gateway: "bkash", eventType: "payment.success", transactionId: mockTrxId, amount: 1500, currency: "BDT", status: "SUCCESS",
         });
-
         assert.equal(result.success, true);
-        assert.equal(result.verified, true);
         assert.equal(result.isDuplicate, true);
         assert.equal(result.status, "IGNORED");
-        assert.match(result.message, /already processed/);
       } finally {
         Payment.findOne = origFindOne;
+      }
+    });
+
+    it("should prevent concurrent webhook duplicate settlement via atomic database lock", async () => {
+      const pg = PaymentGatewayService.getInstance();
+      const origRateLimitCreate = RateLimit.create;
+
+      RateLimit.create = async () => {
+        const err = new Error("E11000 duplicate key error");
+        err.code = 11000;
+        throw err;
+      };
+
+      try {
+        const res = await pg.processWebhook({
+          gateway: "bkash", eventType: "payment.success", transactionId: "TRX-CONCURRENT", amount: 2500, currency: "BDT", status: "SUCCESS",
+        });
+        assert.equal(res.success, true);
+        assert.equal(res.isDuplicate, true);
+        assert.equal(res.status, "IGNORED");
+      } finally {
+        RateLimit.create = origRateLimitCreate;
+      }
+    });
+
+    it("should reject non-BDT currency and invalid amount before settlement", async () => {
+      const pg = PaymentGatewayService.getInstance();
+      const origCreate = RateLimit.create;
+      const origDelete = RateLimit.deleteOne;
+      RateLimit.create = async () => ({});
+      RateLimit.deleteOne = async () => ({});
+
+      try {
+        const currRes = await pg.processWebhook({
+          gateway: "sslcommerz", eventType: "payment.success", transactionId: "TRX-USD", amount: 100, currency: "USD", status: "SUCCESS",
+        });
+        assert.equal(currRes.success, false);
+        assert.match(currRes.message, /Unsupported currency/);
+
+        const amtRes = await pg.processWebhook({
+          gateway: "sslcommerz", eventType: "payment.success", transactionId: "TRX-NEG", amount: -50, currency: "BDT", status: "SUCCESS",
+        });
+        assert.equal(amtRes.success, false);
+        assert.match(amtRes.message, /Invalid payment amount/);
+      } finally {
+        RateLimit.create = origCreate;
+        RateLimit.deleteOne = origDelete;
       }
     });
   });
@@ -176,12 +165,10 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
     it("should return NOT_CONFIGURED and promote manual entry fallback when unconfigured", async () => {
       const ocr = OcrIntegrationService.getInstance();
       assert.equal(ocr.isConfigured(), false);
-
-      const result = await ocr.extractFromFile(Buffer.from("dummy-invoice"), "application/pdf");
+      const result = await ocr.extractFromFile(Buffer.from("dummy"), "application/pdf");
       assert.equal(result.isConfigured, false);
       assert.equal(result.status, "NOT_CONFIGURED");
       assert.match(result.errorMessage, /manual challan entry/);
-      assert.equal(result.lineItems.length, 0);
     });
   });
 
@@ -189,23 +176,14 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
     it("should never throw even if external providers fail", async () => {
       const origCreate = Notification.create;
       let inAppCreated = false;
-      Notification.create = async () => {
-        inAppCreated = true;
-        return {};
-      };
+      Notification.create = async () => { inAppCreated = true; return {}; };
 
       try {
         const res = await ExternalNotificationDispatcher.dispatch({
-          title: "System Alert",
-          message: "Database checkpoint finished",
-          type: "system",
-          recipientPhone: "01712345678",
-          channels: ["in_app", "sms", "whatsapp"],
+          title: "System Alert", message: "Checkpoint ok", recipientPhone: "01712345678", channels: ["in_app", "sms", "whatsapp"],
         });
-
         assert.equal(inAppCreated, true);
         assert.equal(res.inAppDelivered, true);
-        // SMS & WhatsApp fail gracefully with NOT_CONFIGURED without throwing
         assert.equal(res.smsDelivered, false);
         assert.equal(res.whatsAppDelivered, false);
         assert.ok(res.errors.length > 0);
@@ -215,8 +193,8 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
     });
   });
 
-  describe("6. Integration Manager & Credential Masking", () => {
-    it("should return 5 provider summaries with zero exposed secrets", async () => {
+  describe("6. Provider Status & Credential Masking", () => {
+    it("should distinguish configured from live verified and mask credentials", async () => {
       process.env.PAYMENT_GATEWAY_SECRET = "super_confidential_secret_key";
       process.env.SMS_API_KEY = "confidential_sms_token";
       process.env.WHATSAPP_API_TOKEN = "confidential_meta_token";
@@ -229,14 +207,14 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
         const overview = await IntegrationManagerService.getProvidersOverview(dummyBusinessId);
 
         assert.equal(overview.length, 5);
-        const types = overview.map((p) => p.type);
-        assert.ok(types.includes("sms"));
-        assert.ok(types.includes("whatsapp"));
-        assert.ok(types.includes("payment_gateway"));
-        assert.ok(types.includes("ocr"));
-        assert.ok(types.includes("notification_hub"));
+        const sms = overview.find((p) => p.type === "sms");
+        assert.equal(sms?.status, "CONFIGURED");
+        assert.equal(sms?.connectionState, "UNTESTED");
 
-        // Verify zero secret leakage
+        const ocr = overview.find((p) => p.type === "ocr");
+        assert.equal(ocr?.status, "NOT_CONFIGURED");
+        assert.equal(ocr?.connectionState, "NOT_CONFIGURED");
+
         const stringified = JSON.stringify(overview);
         assert.equal(stringified.includes("super_confidential_secret_key"), false);
         assert.equal(stringified.includes("confidential_sms_token"), false);

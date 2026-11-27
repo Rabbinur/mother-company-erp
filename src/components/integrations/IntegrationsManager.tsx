@@ -152,8 +152,10 @@ export function IntegrationsManager() {
                   {/* Status Badge */}
                   <span
                     className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                      p.status === "CONFIGURED"
+                      p.connectionState === "VERIFIED"
                         ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                        : p.status === "CONFIGURED"
+                        ? "bg-sky-500/10 text-sky-400 border border-sky-500/20"
                         : p.status === "DISABLED"
                         ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
                         : p.status === "ERROR"
@@ -161,11 +163,20 @@ export function IntegrationsManager() {
                         : "bg-slate-800 text-slate-400 border border-slate-700"
                     }`}
                   >
-                    {p.status === "CONFIGURED" && <CheckCircle2 className="h-3 w-3" />}
+                    {p.connectionState === "VERIFIED" && <CheckCircle2 className="h-3 w-3" />}
+                    {p.status === "CONFIGURED" && p.connectionState === "UNTESTED" && <CheckCircle2 className="h-3 w-3" />}
                     {p.status === "DISABLED" && <Power className="h-3 w-3" />}
                     {p.status === "ERROR" && <XCircle className="h-3 w-3" />}
                     {p.status === "NOT_CONFIGURED" && <AlertTriangle className="h-3 w-3" />}
-                    {p.status}
+                    {p.connectionState === "VERIFIED"
+                      ? "Verified Active"
+                      : p.status === "CONFIGURED"
+                      ? "Configured (Untested)"
+                      : p.status === "DISABLED"
+                      ? "Disabled by Owner"
+                      : p.status === "ERROR"
+                      ? "Error"
+                      : "Not Configured"}
                   </span>
                 </div>
 

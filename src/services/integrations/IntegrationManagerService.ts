@@ -107,14 +107,23 @@ export class IntegrationManagerService {
       const isEnabled = setting ? Boolean(setting.enabled) : p.isConfigured;
 
       let status: IntegrationStatus = "NOT_CONFIGURED";
+      let connectionState: import("./types").ProviderConnectionState = "NOT_CONFIGURED";
+
       if (!p.isConfigured) {
         status = "NOT_CONFIGURED";
+        connectionState = "NOT_CONFIGURED";
       } else if (!isEnabled) {
         status = "DISABLED";
+        connectionState = "UNTESTED";
       } else if (setting?.lastError) {
         status = "ERROR";
+        connectionState = "ERROR";
+      } else if (setting?.lastActivityAt) {
+        status = "CONFIGURED";
+        connectionState = "VERIFIED";
       } else {
         status = "CONFIGURED";
+        connectionState = "UNTESTED";
       }
 
       return {
@@ -123,11 +132,22 @@ export class IntegrationManagerService {
         label: p.label,
         description: p.description,
         status,
+        connectionState,
         isConfigured: p.isConfigured,
         isEnabled,
         lastActivityAt: setting?.lastActivityAt?.toISOString(),
         lastError: setting?.lastError,
-        safeMetadata: p.safeMeta,
+        safeMetadata: {
+          ...p.safeMeta,
+          connectionStatus:
+            connectionState === "VERIFIED"
+              ? "Verified active via recent activity"
+              : connectionState === "UNTESTED"
+              ? "Credentials present (awaiting first verified activity)"
+              : connectionState === "ERROR"
+              ? "Connection error recorded"
+              : "Credentials not configured",
+        },
       };
     });
   }
