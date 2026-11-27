@@ -46,3 +46,5 @@ export * from "./AutomationRule";
 export * from "./AutomationEvent";
 export * from "./AutomationExecution";
 export * from "./IntegrationSetting";
+export * from "./DeliveryCollection";
+export * from "./SalesTarget";

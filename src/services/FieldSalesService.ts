@@ -3,7 +3,9 @@ import { Product } from "@/models/Product";
 import { ProductVariant } from "@/models/ProductVariant";
 import { InventoryBalance } from "@/models/InventoryBalance";
 import { Warehouse } from "@/models/Warehouse";
-import { Order, IOrder } from "@/models/Order";
+import { Order, type IOrder } from "@/models/Order";
+import { Customer } from "@/models/Customer";
+import { CustomerDealershipAccount } from "@/models/CustomerDealershipAccount";
 import { OrderService } from "./OrderService";
 
 export interface FieldSalesProductItem {
@@ -181,5 +183,72 @@ export class FieldSalesService {
       order._id as mongoose.Types.ObjectId,
       reason || "Cancelled by Field Sales System"
     );
+  }
+
+  /**
+   * Sync Field Sales customer/shopkeeper into Mother ERP with deduplication
+   */
+  static async syncCustomer(params: {
+    name: string;
+    shopName: string;
+    phone: string;
+    dealershipId: string | mongoose.Types.ObjectId;
+    businessId: string | mongoose.Types.ObjectId;
+    address?: string;
+    creditLimit?: number;
+    salesmanId?: string | mongoose.Types.ObjectId;
+  }): Promise<{ customerId: string; customerCode: string; isNew: boolean }> {
+    const cleanedPhone = params.phone.replace(/[^0-9]/g, "");
+
+    // 1. Deduplication by phone or exact shop name
+    let customer = await Customer.findOne({
+      $or: [{ phone: cleanedPhone }, { phone: params.phone }],
+    });
+
+    let isNew = false;
+    if (!customer) {
+      const code = `CUST-FS-${Math.floor(Math.random() * 90000 + 10000)}`;
+      customer = await Customer.create({
+        customerCode: code,
+        name: params.name,
+        shopName: params.shopName,
+        phone: cleanedPhone || params.phone,
+        address: params.address,
+        creditLimit: params.creditLimit || 0,
+        status: "active",
+      });
+      isNew = true;
+    }
+
+    // 2. Ensure dealership subledger exists
+    const dId = new mongoose.Types.ObjectId(String(params.dealershipId));
+    const bId = new mongoose.Types.ObjectId(String(params.businessId));
+    const sId = params.salesmanId ? new mongoose.Types.ObjectId(String(params.salesmanId)) : undefined;
+
+    await CustomerDealershipAccount.findOneAndUpdate(
+      { customerId: customer._id, dealershipId: dId },
+      {
+        $setOnInsert: {
+          businessId: bId,
+          creditLimit: params.creditLimit || customer.creditLimit || 0,
+          currentBalance: 0,
+          totalInvoiced: 0,
+          totalCollected: 0,
+          totalReturned: 0,
+          status: "active",
+        },
+        $set: {
+          assignedSalesmanId: sId,
+          isDeleted: false,
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    return {
+      customerId: String(customer._id),
+      customerCode: customer.customerCode,
+      isNew,
+    };
   }
 }

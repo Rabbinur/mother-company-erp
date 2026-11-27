@@ -25,6 +25,10 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
       "PAYMENT_GATEWAY_KEY", "PAYMENT_GATEWAY_SECRET",
       "OCR_API_KEY", "GOOGLE_VISION_KEY",
     ].forEach((k) => delete process.env[k]);
+
+    // Avoid unbuffered Mongoose 10s timeout during isolated unit test runs
+    RateLimit.create = async () => ({});
+    RateLimit.deleteOne = async () => ({});
   });
 
   describe("1. SMS Provider Service", () => {
@@ -137,10 +141,8 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
 
     it("should reject non-BDT currency and invalid amount before settlement", async () => {
       const pg = PaymentGatewayService.getInstance();
-      const origCreate = RateLimit.create;
-      const origDelete = RateLimit.deleteOne;
-      RateLimit.create = async () => ({});
-      RateLimit.deleteOne = async () => ({});
+      const origFind = Payment.findOne;
+      Payment.findOne = async () => null;
 
       try {
         const currRes = await pg.processWebhook({
@@ -155,8 +157,7 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
         assert.equal(amtRes.success, false);
         assert.match(amtRes.message, /Invalid payment amount/);
       } finally {
-        RateLimit.create = origCreate;
-        RateLimit.deleteOne = origDelete;
+        Payment.findOne = origFind;
       }
     });
   });
@@ -196,8 +197,11 @@ describe("Phase 4 Step 5: External Integrations Test Suite", () => {
   describe("6. Provider Status & Credential Masking", () => {
     it("should distinguish configured from live verified and mask credentials", async () => {
       process.env.PAYMENT_GATEWAY_SECRET = "super_confidential_secret_key";
+      process.env.PAYMENT_GATEWAY_KEY = "pg_key_123";
       process.env.SMS_API_KEY = "confidential_sms_token";
+      process.env.SMS_SENDER_ID = "MC_ERP";
       process.env.WHATSAPP_API_TOKEN = "confidential_meta_token";
+      process.env.WHATSAPP_PHONE_NUMBER_ID = "123456789";
 
       const origFind = IntegrationSetting.find;
       IntegrationSetting.find = async () => [];

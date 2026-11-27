@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { Order, IOrder, IOrderItem } from "@/models/Order";
+import { Order, type IOrder, type IOrderItem } from "@/models/Order";
 import { Customer } from "@/models/Customer";
 import { ProductVariant } from "@/models/ProductVariant";
 import { InventoryService } from "./InventoryService";
