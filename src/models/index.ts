@@ -45,3 +45,4 @@ export * from "./BankReconciliation";
 export * from "./AutomationRule";
 export * from "./AutomationEvent";
 export * from "./AutomationExecution";
+export * from "./IntegrationSetting";
