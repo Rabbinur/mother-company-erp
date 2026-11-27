@@ -10,6 +10,7 @@ import { StockBatch } from "../src/models/StockBatch.ts";
 import { Claim } from "../src/models/Claim.ts";
 import { Dealership } from "../src/models/Dealership.ts";
 import { OperationalAnalyticsService } from "../src/services/analytics/OperationalAnalyticsService.ts";
+import { DashboardDateHelper } from "../src/services/dashboard/DashboardDateHelper.ts";
 
 describe("Phase 4 - Step 4: Operational Intelligence & Reports Verification", () => {
   let dispatches = [], vehicles = [], grns = [], movements = [], batches = [], claims = [];
@@ -156,45 +157,56 @@ describe("Phase 4 - Step 4: Operational Intelligence & Reports Verification", ()
     assert.equal(b2.deliveryPerformance.totalOrdersAssigned, 2);
   });
 
-  test("8. Print Reports: Custom date range filters and Delivery Report separation", async () => {
-    const dOld = new Date("2026-01-01T00:00:00Z");
+  test("8. Print Reports & Cash Collection Confidentiality: API-level masking when canViewCosts is false", async () => {
     const dNew = new Date("2026-11-20T10:00:00Z");
+    dispatches.push({
+      businessId: bId, dispatchNumber: "DSP-NEW", createdAt: dNew, tripDate: dNew, status: "DELIVERED",
+      vehicleNumber: "DHAKA-12", deliverymanName: "Kashem", startedAt: new Date(dNew.getTime() - 3600000), completedAt: dNew,
+      orders: [{ stopSequence: 1, orderNumber: "ORD-1", customerName: "Bhai Bhai Store", shopName: "Shop A", address: "Mirpur 1", status: "delivered", cashCollected: 500 }],
+      items: [{ loadedQuantity: 50, deliveredQuantity: 50 }],
+      expenses: [{ amount: 400 }],
+      reconciliation: { isStockBalanced: true, stockVariance: 0, cashDifference: 0 },
+    });
+
+    // Authorized run: cash collection and expenses are visible
+    const authReport = await OperationalAnalyticsService.getDeliveryReport({
+      businessId: bId, startDate: new Date("2026-11-01T00:00:00Z"), endDate: new Date("2026-11-30T23:59:59Z"), canViewCosts: true,
+    });
+    assert.equal(authReport.summary.totalTrips, 1);
+    assert.equal(authReport.trips[0].stops[0].cashCollected, 500);
+    assert.equal(authReport.summary.totalCashCollected, 500);
+    assert.equal(authReport.trips[0].deliveryExpenses, 400);
+
+    // Unauthorized run: cash collection and expenses are null at the API level
+    const maskedReport = await OperationalAnalyticsService.getDeliveryReport({
+      businessId: bId, startDate: new Date("2026-11-01T00:00:00Z"), endDate: new Date("2026-11-30T23:59:59Z"), canViewCosts: false,
+    });
+    assert.equal(maskedReport.summary.totalDeliveryExpenses, null);
+    assert.equal(maskedReport.summary.totalCashCollected, null);
+    assert.equal(maskedReport.trips[0].deliveryExpenses, null);
+    assert.equal(maskedReport.trips[0].stops[0].cashCollected, null);
+  });
+
+  test("9. Custom Date Range & Bangladesh Timezone: Includes event at 23:45 BST and excludes next day", async () => {
+    // 2026-11-20 23:45 BST = 2026-11-20 17:45 UTC
+    const endOfDayBST = new Date("2026-11-20T17:45:00.000Z");
+    // 2026-11-21 00:15 BST = 2026-11-20 18:15 UTC (next day in Bangladesh)
+    const nextDayBST = new Date("2026-11-20T18:15:00.000Z");
 
     dispatches.push(
-      { businessId: bId, dispatchNumber: "DSP-OLD", createdAt: dOld, tripDate: dOld, status: "DELIVERED", orders: [{ status: "delivered" }] },
-      {
-        businessId: bId, dispatchNumber: "DSP-NEW", createdAt: dNew, tripDate: dNew, status: "DELIVERED",
-        vehicleNumber: "DHAKA-12", deliverymanName: "Kashem", startedAt: new Date(dNew.getTime() - 3600000), completedAt: dNew,
-        orders: [{ stopSequence: 1, orderNumber: "ORD-1", customerName: "Bhai Bhai Store", shopName: "Shop A", address: "Mirpur 1", status: "delivered", cashCollected: 500 }],
-        items: [{ loadedQuantity: 50, deliveredQuantity: 50 }],
-        expenses: [{ amount: 400 }],
-        reconciliation: { isStockBalanced: true, stockVariance: 0, cashDifference: 0 },
-      }
+      { businessId: bId, dispatchNumber: "DSP-LATE", createdAt: endOfDayBST, tripDate: endOfDayBST, status: "DELIVERED", orders: [{ status: "delivered" }] },
+      { businessId: bId, dispatchNumber: "DSP-NEXT", createdAt: nextDayBST, tripDate: nextDayBST, status: "DELIVERED", orders: [{ status: "delivered" }] }
     );
 
-    // Query Delivery Report for November 2026 only
+    const range = DashboardDateHelper.parseDateRange({ startDate: "2026-11-20", endDate: "2026-11-20" });
+    assert.equal(range.startDate.toISOString(), "2026-11-19T18:00:00.000Z");
+    assert.equal(range.endDate.toISOString(), "2026-11-20T17:59:59.999Z");
+
     const report = await OperationalAnalyticsService.getDeliveryReport({
-      businessId: bId,
-      startDate: new Date("2026-11-01T00:00:00Z"),
-      endDate: new Date("2026-11-30T23:59:59Z"),
-      canViewCosts: true,
+      businessId: bId, startDate: "2026-11-20", endDate: "2026-11-20", canViewCosts: true,
     });
 
     assert.equal(report.summary.totalTrips, 1);
-    assert.equal(report.trips[0].dispatchNumber, "DSP-NEW");
-    assert.equal(report.trips[0].stops[0].customerName, "Bhai Bhai Store");
-    assert.equal(report.trips[0].stops[0].cashCollected, 500);
-    assert.equal(report.trips[0].deliveryExpenses, 400);
-    assert.equal(report.trips[0].reconciliationDiscrepancy, false);
-
-    // Cost masking check in Delivery Report
-    const maskedReport = await OperationalAnalyticsService.getDeliveryReport({
-      businessId: bId,
-      startDate: new Date("2026-11-01T00:00:00Z"),
-      endDate: new Date("2026-11-30T23:59:59Z"),
-      canViewCosts: false,
-    });
-    assert.equal(maskedReport.summary.totalDeliveryExpenses, null);
-    assert.equal(maskedReport.trips[0].deliveryExpenses, null);
+    assert.equal(report.trips[0].dispatchNumber, "DSP-LATE"); // Successfully included without off-by-one truncation
   });
 });

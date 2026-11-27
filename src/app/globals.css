@@ -64,11 +64,31 @@
     background: transparent !important;
     color: black !important;
   }
-  .no-print, header, nav, aside {
+  /* Hide dashboard navigation and app header without hiding report content */
+  .no-print,
+  aside,
+  header.sticky,
+  .app-sidebar,
+  .app-header {
     display: none !important;
   }
   .print-only {
     display: block !important;
+  }
+  /* Ensure report header and report containers remain fully visible */
+  .report-header,
+  #printable-general-report,
+  #printable-delivery-report {
+    display: block !important;
+  }
+  /* Remove layout padding so reports span full printable area */
+  div.pl-64,
+  div[class*="pl-64"] {
+    padding-left: 0 !important;
+  }
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
   }
   @page {
     size: A4 portrait;

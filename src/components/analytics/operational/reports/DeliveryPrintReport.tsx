@@ -146,7 +146,9 @@ export function DeliveryPrintReport({ data, dealershipName, startDate, endDate }
                               {st.status}
                             </span>
                           </td>
-                          <td className="p-1.5 text-right border border-slate-200 font-medium">৳{st.cashCollected.toLocaleString()}</td>
+                          <td className="p-1.5 text-right border border-slate-200 font-medium">
+                            {st.cashCollected !== null ? `৳${st.cashCollected.toLocaleString()}` : <span className="text-muted-foreground italic">Masked</span>}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

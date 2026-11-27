@@ -37,6 +37,7 @@ export class DeliveryReportService {
     let totalReturnedQuantity = 0;
     let totalUndeliveredQuantity = 0;
     let totalDeliveryExpenses = 0;
+    let totalCashCollected = 0;
     let totalTripDurationMinutes = 0;
     let timedTripsCount = 0;
 
@@ -88,6 +89,10 @@ export class DeliveryReportService {
           cancelledStops++;
         }
 
+        if (st.cashCollected) {
+          totalCashCollected += st.cashCollected;
+        }
+
         stops.push({
           stopSequence: st.stopSequence || stops.length + 1,
           orderNumber: st.orderNumber || "N/A",
@@ -97,7 +102,7 @@ export class DeliveryReportService {
           status: st.status || "pending",
           deliveredAt: st.deliveredAt || null,
           failureReason: st.failureReason,
-          cashCollected: st.cashCollected || 0,
+          cashCollected: params.canViewCosts ? (st.cashCollected || 0) : null,
         });
       }
 
@@ -210,6 +215,7 @@ export class DeliveryReportService {
         totalReturnedQuantity,
         totalUndeliveredQuantity,
         totalDeliveryExpenses: params.canViewCosts ? Number(totalDeliveryExpenses.toFixed(2)) : null,
+        totalCashCollected: params.canViewCosts ? Number(totalCashCollected.toFixed(2)) : null,
         averageTripDurationMinutes: avgTripDuration,
       },
       trips,

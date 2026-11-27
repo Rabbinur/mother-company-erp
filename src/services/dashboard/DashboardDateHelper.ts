@@ -2,6 +2,31 @@ import type { DashboardDateRange } from "./types";
 
 export class DashboardDateHelper {
   /**
+   * Parses a date input into a boundary Date respecting Bangladesh Standard Time (UTC+6).
+   */
+  static parseDateBoundary(dateInput: string | Date, isEndOfDay: boolean): Date {
+    if (typeof dateInput === "string") {
+      const trimmed = dateInput.trim();
+      // Date-only string (YYYY-MM-DD): apply explicit Bangladesh timezone offset (+06:00)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        return new Date(`${trimmed}T${isEndOfDay ? "23:59:59.999" : "00:00:00.000"}+06:00`);
+      }
+      const d = new Date(trimmed);
+      if (!isNaN(d.getTime())) {
+        if (isEndOfDay && !trimmed.includes("T")) {
+          d.setHours(23, 59, 59, 999);
+        }
+        return d;
+      }
+    }
+    const d = new Date(dateInput);
+    if (isEndOfDay && d instanceof Date && !isNaN(d.getTime())) {
+      d.setHours(23, 59, 59, 999);
+    }
+    return d;
+  }
+
+  /**
    * Parses time intervals into current and equivalent prior comparison date intervals.
    * Supports both object parameters and string/positional parameters.
    */
@@ -37,11 +62,11 @@ export class DashboardDateHelper {
     let endDate: Date = new Date(now);
     endDate.setHours(23, 59, 59, 999);
 
-    if (customStartDate && customEndDate && preset === "custom") {
-      startDate = new Date(customStartDate);
-      startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(customEndDate);
-      endDate.setHours(23, 59, 59, 999);
+    const hasCustomDates = Boolean(customStartDate && customEndDate);
+    if (hasCustomDates || preset === "custom") {
+      preset = "custom";
+      startDate = customStartDate ? this.parseDateBoundary(customStartDate, false) : new Date(now);
+      endDate = customEndDate ? this.parseDateBoundary(customEndDate, true) : new Date(now);
     } else {
       switch (preset) {
         case "today": {

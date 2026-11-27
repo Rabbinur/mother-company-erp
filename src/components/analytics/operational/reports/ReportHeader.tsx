@@ -44,7 +44,7 @@ export function ReportHeader({
   };
 
   return (
-    <div className="border-b-2 border-slate-800 pb-4 mb-6">
+    <div className="report-header print:block border-b-2 border-slate-800 pb-4 mb-6">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">

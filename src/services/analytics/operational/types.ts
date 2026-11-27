@@ -176,7 +176,7 @@ export interface DeliveryReportStopItem {
   status: string;
   deliveredAt?: Date | null;
   failureReason?: string;
-  cashCollected: number;
+  cashCollected: number | null;
 }
 
 export interface DeliveryReportTripItem {
@@ -227,6 +227,7 @@ export interface DeliveryReportPayload {
     totalReturnedQuantity: number;
     totalUndeliveredQuantity: number;
     totalDeliveryExpenses: number | null;
+    totalCashCollected: number | null;
     averageTripDurationMinutes: number | null;
   };
   trips: DeliveryReportTripItem[];
