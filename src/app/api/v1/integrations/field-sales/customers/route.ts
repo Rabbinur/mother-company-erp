@@ -32,11 +32,22 @@ export async function GET(req: NextRequest) {
     }
 
     const customers = await Customer.find(filter)
-      .select("customerCode name shopName phone address creditLimit currentReceivable")
+      .select("customerCode name shopName phone address status")
       .limit(50)
       .lean();
 
-    return successResponse(customers, "Field sales customers retrieved");
+    // STRICT SECURITY: Never expose customer financial information (creditLimit, receivable, dues) to salesmen
+    const sanitized = customers.map((c) => ({
+      id: String(c._id),
+      customerCode: c.customerCode,
+      name: c.name,
+      shopName: c.shopName,
+      phone: c.phone,
+      address: c.address,
+      status: c.status,
+    }));
+
+    return successResponse(sanitized, "Field sales customers retrieved");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Failed to list customers";
     return errorResponse(msg, 500);

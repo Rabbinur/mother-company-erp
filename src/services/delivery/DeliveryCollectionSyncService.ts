@@ -5,14 +5,20 @@ import { Customer } from "@/models/Customer";
 import { Dispatch } from "@/models/Dispatch";
 import { RateLimit } from "@/models/RateLimit";
 import { Account } from "@/models/Account";
+import { CustomerDealershipAccount } from "@/models/CustomerDealershipAccount";
 import { PaymentService } from "@/services/PaymentService";
 
 export interface RecordDeliveryCollectionInput {
   collectionId?: string;
-  orderId: string | mongoose.Types.ObjectId;
-  deliverymanId: string | mongoose.Types.ObjectId;
+  orderId?: string | mongoose.Types.ObjectId;
+  customerId?: string | mongoose.Types.ObjectId;
+  dealershipId?: string | mongoose.Types.ObjectId;
+  deliverymanId?: string | mongoose.Types.ObjectId;
+  salesmanId?: string | mongoose.Types.ObjectId;
+  collectorId?: string | mongoose.Types.ObjectId;
+  collectorRole?: "salesman" | "deliveryman";
   amount: number;
-  paymentMethod: "cash" | "bkash" | "nagad" | "bank_transfer" | "other";
+  paymentMethod?: "cash";
   transactionReference?: string;
   dispatchId?: string | mongoose.Types.ObjectId;
   notes?: string;
@@ -24,129 +30,136 @@ export interface RecordDeliveryCollectionInput {
 
 export interface DeliverymanFinancialSummary {
   deliverymanId: string;
+  totalCashCollected: number;
+  totalCashDeposited: number;
+  currentCashHeld: number; // Formula: verifiedCashCollected - verifiedCashDeposited
+  pendingReconciliation: number;
+  verifiedDeposits: number;
+  verifiedCashCollected: number;
+  pendingCashCollected: number;
+  // Compatibility aliases
   totalCollected: number;
   totalDeposited: number;
-  currentCashHeld: number;
-  pendingReconciliation: number;
+  reconciledAmount: number;
   verifiedCount: number;
   pendingCount: number;
   recentCollections: Array<{
     collectionId: string;
-    orderNumber?: string;
     amount: number;
-    paymentMethod: string;
+    paymentMethod: "cash";
     status: string;
     syncStatus: string;
     collectedAt: string;
+    orderId?: string;
   }>;
 }
 
 export class DeliveryCollectionSyncService {
   /**
-   * Record collection from deliveryman with durable cross-app idempotency
+   * Record physical cash collection from deliveryman with durable cross-app idempotency
    */
-  static async recordCollection(
-    input: RecordDeliveryCollectionInput
-  ): Promise<IDeliveryCollection> {
-    const oId = new mongoose.Types.ObjectId(String(input.orderId));
-    const dManId = new mongoose.Types.ObjectId(String(input.deliverymanId));
+  static async recordCollection(input: RecordDeliveryCollectionInput): Promise<IDeliveryCollection> {
     const amount = Number(input.amount);
+    if (!amount || amount <= 0 || !Number.isFinite(amount)) throw new Error("Collection amount must be positive");
 
-    if (!amount || amount <= 0 || !Number.isFinite(amount)) {
-      throw new Error("Collection amount must be a positive number");
+    if (input.paymentMethod && input.paymentMethod !== "cash") {
+      throw new Error("Deliveryman collections currently accept physical cash only.");
     }
 
-    // 1. Durable Idempotency Check
+    const collectorRole = input.collectorRole || (input.salesmanId ? "salesman" : "deliveryman");
+    const collectorId = input.collectorId || input.salesmanId || input.deliverymanId;
+    if (!collectorId) throw new Error("Collector identity is required");
+
+    // STRICT LAW: Salesman can NEVER self-verify their own collection. New collections always start pending_verification.
+    const isSalesman = collectorRole === "salesman";
+    const isAutoVerified = isSalesman ? false : Boolean(input.autoVerifyIfPermitted);
+
+    // Derive order, customer, dealership, business
+    let oId = input.orderId ? new mongoose.Types.ObjectId(String(input.orderId)) : undefined;
+    let customerId = input.customerId ? new mongoose.Types.ObjectId(String(input.customerId)) : undefined;
+    let dealershipId = input.dealershipId ? new mongoose.Types.ObjectId(String(input.dealershipId)) : undefined;
+    let businessId: any = null;
+
+    if (oId) {
+      const order = await Order.findById(oId);
+      if (!order) throw new Error("Order not found for collection");
+      customerId = order.customerId;
+      dealershipId = order.dealershipId;
+      businessId = order.businessId;
+    } else if (customerId && dealershipId) {
+      const customer = await Customer.findById(customerId);
+      if (!customer) throw new Error("Customer not found for collection");
+      const account = await CustomerDealershipAccount.findOne({ customerId, dealershipId });
+      if (!account) throw new Error("Customer has no account with this dealership");
+      businessId = account.businessId;
+    } else {
+      throw new Error("Either orderId or both customerId and dealershipId are required");
+    }
+
     const idempKey = input.idempotencyKey || input.collectionId;
-    if (idempKey) {
-      if (mongoose.connection.readyState === 1) {
-        try {
-          await RateLimit.create({
-            key: `idemp:col:${idempKey}`,
-            windowId: 0,
-            hits: 1,
-            expireAt: new Date(Date.now() + 86400000),
-          });
-        } catch (err: any) {
-          if (err?.code === 11000) {
-            const existing = await DeliveryCollection.findOne({
-              $or: [{ collectionId: idempKey }, { idempotencyKey: idempKey }],
-            });
-            if (existing) return existing;
-          }
+    if (idempKey && mongoose.connection.readyState === 1) {
+      try {
+        await RateLimit.create({ key: `idemp:col:${idempKey}`, windowId: 0, hits: 1, expireAt: new Date(Date.now() + 86400000) });
+      } catch (err: any) {
+        if (err?.code === 11000) {
+          const existing = await DeliveryCollection.findOne({ $or: [{ collectionId: idempKey }, { idempotencyKey: idempKey }] });
+          if (existing) return existing;
         }
       }
     }
 
-    const order = await Order.findById(oId);
-    if (!order) {
-      throw new Error("Order not found for collection");
-    }
-
-    const customer = await Customer.findById(order.customerId);
-    if (!customer) {
-      throw new Error("Customer not found for order");
-    }
-
-    const collectionId =
-      input.collectionId || `COL-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
+    const collectionId = input.collectionId || `COL-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
 
     const collection = await DeliveryCollection.create({
       collectionId,
-      businessId: order.businessId,
-      dealershipId: order.dealershipId,
+      businessId,
+      dealershipId,
       orderId: oId,
-      customerId: order.customerId,
-      deliverymanId: dManId,
+      customerId,
+      deliverymanId: collectorRole === "deliveryman" ? new mongoose.Types.ObjectId(String(collectorId)) : undefined,
+      salesmanId: collectorRole === "salesman" ? new mongoose.Types.ObjectId(String(collectorId)) : undefined,
+      collectorRole,
       dispatchId: input.dispatchId ? new mongoose.Types.ObjectId(String(input.dispatchId)) : undefined,
       amount,
-      paymentMethod: input.paymentMethod || "cash",
+      paymentMethod: "cash",
       transactionReference: input.transactionReference,
-      status: input.autoVerifyIfPermitted ? "verified" : "pending_verification",
+      status: isAutoVerified ? "verified" : "pending_verification",
       syncStatus: "SYNCED",
-      source: input.source || "mother_erp",
+      source: input.source || "field_sales",
       idempotencyKey: idempKey,
       notes: input.notes,
-      verifiedBy: input.autoVerifyIfPermitted && input.actorId ? new mongoose.Types.ObjectId(String(input.actorId)) : undefined,
-      verifiedAt: input.autoVerifyIfPermitted ? new Date() : undefined,
+      verifiedBy: isAutoVerified && input.actorId ? new mongoose.Types.ObjectId(String(input.actorId)) : undefined,
+      verifiedAt: isAutoVerified ? new Date() : undefined,
     });
 
-    // Update dispatch stop collection if dispatch linked
-    if (input.dispatchId) {
+    if (input.dispatchId && oId) {
       await Dispatch.updateOne(
         { _id: new mongoose.Types.ObjectId(String(input.dispatchId)), "orders.orderId": oId },
-        {
-          $inc: {
-            "orders.$.cashCollected": input.paymentMethod === "cash" ? amount : 0,
-            "orders.$.digitalPaymentCollected": input.paymentMethod !== "cash" ? amount : 0,
-          },
-        }
+        { $inc: { "orders.$.cashCollected": amount } }
       ).catch(() => {});
     }
 
-    // If auto-verified, settle directly to ledger
-    if (collection.status === "verified") {
-      await this.settleCollectionToLedger(collection);
-    }
-
+    if (collection.status === "verified") await this.settleCollectionToLedger(collection);
     return collection;
   }
 
   /**
    * Verify collection and settle double-entry accounting ledger
    */
-  static async verifyCollection(params: {
-    collectionId: string;
-    verifierId: string | mongoose.Types.ObjectId;
-  }): Promise<IDeliveryCollection> {
+  static async verifyCollection(params: { collectionId: string; verifierId: string | mongoose.Types.ObjectId }): Promise<IDeliveryCollection> {
     const col = await DeliveryCollection.findOne({ collectionId: params.collectionId });
     if (!col) throw new Error("Delivery collection record not found");
-    if (col.status === "verified" || col.status === "deposited" || col.status === "reconciled") {
-      return col;
+    if (col.status === "verified" || col.status === "deposited" || col.status === "reconciled") return col;
+
+    // Strict Security Rule: Collector cannot verify their own collection
+    const verifierStr = String(params.verifierId);
+    const collectorStr = String(col.deliverymanId || col.salesmanId || "");
+    if (verifierStr && verifierStr === collectorStr) {
+      throw new Error("Security Violation: Collector cannot verify their own collection.");
     }
 
     col.status = "verified";
-    col.verifiedBy = new mongoose.Types.ObjectId(String(params.verifierId));
+    col.verifiedBy = new mongoose.Types.ObjectId(verifierStr);
     col.verifiedAt = new Date();
     await col.save();
 
@@ -154,20 +167,8 @@ export class DeliveryCollectionSyncService {
     return col;
   }
 
-  /**
-   * Internal double-entry posting to PaymentService
-   */
   private static async settleCollectionToLedger(col: IDeliveryCollection): Promise<void> {
-    let receivingAccount = await Account.findOne({
-      type: "asset",
-      subType: col.paymentMethod === "cash" ? "cash" : "bank",
-      isActive: true,
-    });
-
-    if (!receivingAccount) {
-      receivingAccount = await Account.findOne({ type: "asset", isActive: true });
-    }
-
+    const receivingAccount = (await Account.findOne({ type: "asset", subType: "cash", isActive: true })) || (await Account.findOne({ type: "asset", isActive: true }));
     if (!receivingAccount) return;
 
     await PaymentService.recordCustomerPayment({
@@ -175,11 +176,11 @@ export class DeliveryCollectionSyncService {
       dealershipId: col.dealershipId,
       accountId: receivingAccount._id as mongoose.Types.ObjectId,
       amount: col.amount,
-      paymentMethod: col.paymentMethod,
+      paymentMethod: "cash",
       transactionReference: col.collectionId,
       idempotencyKey: `col-settle-${col.collectionId}`,
-      notes: `Deliveryman collection ${col.collectionId} verified`,
-      allocations: [{ orderId: col.orderId, amount: col.amount }],
+      notes: `${col.collectorRole === "salesman" ? "Salesman" : "Deliveryman"} cash collection ${col.collectionId} verified`,
+      allocations: col.orderId ? [{ orderId: col.orderId, amount: col.amount }] : [],
       actorId: col.verifiedBy,
     });
   }
@@ -198,87 +199,85 @@ export class DeliveryCollectionSyncService {
   }): Promise<{ depositId: string; reconciledCount: number; totalReconciled: number }> {
     const dManId = String(params.deliverymanId);
     const recBy = String(params.reconciledByUserId);
-
-    if (dManId === recBy) {
-      throw new Error("Security Violation: Deliveryman cannot approve their own deposit reconciliation.");
-    }
+    if (dManId === recBy) throw new Error("Security Violation: Deliveryman cannot approve their own deposit reconciliation.");
 
     const depositId = `DEP-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
     const now = new Date();
 
     const result = await DeliveryCollection.updateMany(
-      {
-        collectionId: { $in: params.collectionIds },
-        deliverymanId: new mongoose.Types.ObjectId(dManId),
-        status: { $in: ["verified", "pending_verification"] },
-      },
-      {
-        $set: {
-          status: "reconciled",
-          depositId,
-          depositedAt: now,
-          reconciledAt: now,
-          reconciledBy: new mongoose.Types.ObjectId(recBy),
-        },
-      }
+      { collectionId: { $in: params.collectionIds }, deliverymanId: new mongoose.Types.ObjectId(dManId), status: { $in: ["verified", "pending_verification"] } },
+      { $set: { status: "reconciled", depositId, depositedAt: now, reconciledAt: now, reconciledBy: new mongoose.Types.ObjectId(recBy) } }
     );
 
-    return {
-      depositId,
-      reconciledCount: result.modifiedCount,
-      totalReconciled: Number(params.depositAmount),
-    };
+    return { depositId, reconciledCount: result.modifiedCount, totalReconciled: Number(params.depositAmount) };
   }
 
   /**
-   * Real-time financial summary of deliveryman cash held and reconciliation
+   * Real-time financial summary of deliveryman cash held and deposit reconciliation.
+   * STRICT CASH LAW: currentCashHeld = verifiedCashCollected - verifiedCashDeposited
    */
-  static async getDeliverymanFinancialSummary(
-    deliverymanId: string | mongoose.Types.ObjectId
-  ): Promise<DeliverymanFinancialSummary> {
+  static async getDeliverymanFinancialSummary(deliverymanId: string | mongoose.Types.ObjectId): Promise<DeliverymanFinancialSummary> {
     const dManId = new mongoose.Types.ObjectId(String(deliverymanId));
+    const collections = await DeliveryCollection.find({ deliverymanId: dManId }).sort({ createdAt: -1 }).limit(50);
 
-    const collections = await DeliveryCollection.find({ deliverymanId: dManId })
-      .sort({ createdAt: -1 })
-      .limit(50);
-
-    let totalCollected = 0;
-    let totalDeposited = 0;
+    let totalCashCollected = 0;
+    let verifiedCashCollected = 0;
+    let pendingCashCollected = 0;
+    let totalCashDeposited = 0;
+    let verifiedDeposits = 0;
     let verifiedCount = 0;
     let pendingCount = 0;
 
     for (const c of collections) {
-      if (c.status !== "cancelled") {
-        totalCollected += c.amount;
-        if (c.status === "deposited" || c.status === "reconciled") {
-          totalDeposited += c.amount;
+      if (c.status === "cancelled") continue;
+      totalCashCollected += c.amount;
+
+      const isVerified = c.status === "verified" || c.status === "deposited" || c.status === "reconciled";
+      const isDeposited = c.status === "deposited" || c.status === "reconciled";
+      const isReconciled = c.status === "reconciled";
+
+      if (isVerified) {
+        verifiedCashCollected += c.amount;
+        verifiedCount++;
+        if (isDeposited) {
+          totalCashDeposited += c.amount;
         }
-        if (c.status === "verified" || c.status === "reconciled") {
-          verifiedCount++;
-        } else {
-          pendingCount++;
+        if (isReconciled) {
+          verifiedDeposits += c.amount;
         }
+      } else {
+        pendingCashCollected += c.amount;
+        pendingCount++;
       }
     }
 
-    const currentCashHeld = Math.max(0, Math.round((totalCollected - totalDeposited) * 100) / 100);
-    const pendingReconciliation = currentCashHeld;
+    // Formula: currentCashHeld = verifiedCashCollected - verifiedCashDeposited
+    const currentCashHeld = Math.max(0, Math.round((verifiedCashCollected - totalCashDeposited) * 100) / 100);
+    const pendingReconciliation = Math.round((currentCashHeld + pendingCashCollected) * 100) / 100;
 
     return {
       deliverymanId: String(dManId),
-      totalCollected: Math.round(totalCollected * 100) / 100,
-      totalDeposited: Math.round(totalDeposited * 100) / 100,
+      totalCashCollected: Math.round(totalCashCollected * 100) / 100,
+      totalCashDeposited: Math.round(totalCashDeposited * 100) / 100,
       currentCashHeld,
       pendingReconciliation,
+      verifiedDeposits: Math.round(verifiedDeposits * 100) / 100,
+      verifiedCashCollected: Math.round(verifiedCashCollected * 100) / 100,
+      pendingCashCollected: Math.round(pendingCashCollected * 100) / 100,
+      // Compatibility aliases
+      totalCollected: Math.round(totalCashCollected * 100) / 100,
+      totalDeposited: Math.round(totalCashDeposited * 100) / 100,
+      reconciledAmount: Math.round(verifiedDeposits * 100) / 100,
       verifiedCount,
       pendingCount,
       recentCollections: collections.map((c) => ({
         collectionId: c.collectionId,
         amount: c.amount,
-        paymentMethod: c.paymentMethod,
+        paymentMethod: "cash" as const,
         status: c.status,
         syncStatus: c.syncStatus,
         collectedAt: c.createdAt.toISOString(),
+        orderId: c.orderId ? String(c.orderId) : undefined,
       })),
     };
   }

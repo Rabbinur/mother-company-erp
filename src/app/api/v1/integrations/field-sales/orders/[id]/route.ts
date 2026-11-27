@@ -28,16 +28,17 @@ export async function GET(
 
   if (!order) return notFoundResponse("Order not found");
 
+  // STRICT SECURITY: Never expose customer balance, dues, or payment accounting to salesmen
   return successResponse({
     orderId: String(order._id),
     orderNumber: order.orderNumber,
     externalOrderId: order.externalOrderId,
     status: order.orderStatus,
     fulfillmentStatus: order.fulfillmentStatus,
-    paymentStatus: order.paymentStatus,
+    deliveryStatus: order.deliveryStatus || "pending",
+    assignedDeliverymanId: order.assignedDeliverymanId ? String(order.assignedDeliverymanId) : undefined,
+    orderTotal: order.grandTotal,
     grandTotal: order.grandTotal,
-    paidAmount: order.paidAmount,
-    receivableAmount: order.receivableAmount,
     items: order.items.map((i) => ({
       variantId: String(i.variantId),
       name: i.name,

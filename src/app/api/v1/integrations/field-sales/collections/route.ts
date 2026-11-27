@@ -17,6 +17,11 @@ export async function GET(req: NextRequest) {
     return unauthorizedResponse("Unauthorized: Missing Field Sales API key or valid ERP session");
   }
 
+  // STRICT SECURITY: Salesmen must NEVER see collection balances or financial summaries
+  if (user && (user.role === "sales_staff" || user.role === "salesman")) {
+    return errorResponse("Forbidden: Sales staff are not permitted to access collection financial summaries", 403);
+  }
+
   const url = req.nextUrl;
   const deliverymanId = url.searchParams.get("deliverymanId") || user?.userId;
 
@@ -55,7 +60,12 @@ export async function POST(req: NextRequest) {
     const {
       collectionId,
       orderId,
+      customerId,
+      dealershipId,
       deliverymanId,
+      salesmanId,
+      collectorId,
+      collectorRole,
       amount,
       paymentMethod,
       transactionReference,
@@ -64,29 +74,47 @@ export async function POST(req: NextRequest) {
       idempotencyKey,
     } = body;
 
-    const targetDManId = deliverymanId || user?.userId;
-    if (!orderId || !targetDManId || !amount) {
-      return errorResponse("orderId, deliverymanId, and amount are required", 400);
+    const targetCollectorId = collectorId || salesmanId || deliverymanId || user?.userId;
+    const isSalesman = collectorRole === "salesman" || user?.role === "sales_staff" || user?.role === "salesman" || Boolean(salesmanId);
+
+    if (!amount || Number(amount) <= 0) {
+      return errorResponse("Positive collection amount is required", 400);
+    }
+    if (!orderId && (!customerId || !dealershipId)) {
+      return errorResponse("Either orderId or both customerId and dealershipId are required", 400);
+    }
+    if (!targetCollectorId) {
+      return errorResponse("Collector identity (salesmanId or deliverymanId) is required", 400);
     }
 
+    if (paymentMethod && paymentMethod !== "cash") {
+      return errorResponse("Collections currently accept physical cash only.", 400);
+    }
+
+    // STRICT LAW: Salesman collections always start pending_verification and cannot be auto-verified
     const collection = await DeliveryCollectionSyncService.recordCollection({
       collectionId,
       orderId,
-      deliverymanId: targetDManId,
+      customerId,
+      dealershipId: dealershipId || (user?.dealershipId ? String(user.dealershipId) : undefined),
+      salesmanId: isSalesman ? targetCollectorId : undefined,
+      deliverymanId: !isSalesman ? targetCollectorId : undefined,
+      collectorId: targetCollectorId,
+      collectorRole: isSalesman ? "salesman" : "deliveryman",
       amount: Number(amount),
-      paymentMethod: paymentMethod || "cash",
+      paymentMethod: "cash",
       transactionReference,
       dispatchId,
       notes,
       source: auth.authenticated ? "field_sales" : "mother_erp",
       idempotencyKey: idempotencyKey || collectionId,
-      autoVerifyIfPermitted: user?.role === "accountant" || user?.role === "manager" || user?.role === "admin",
+      autoVerifyIfPermitted: isSalesman ? false : (user?.role === "accountant" || user?.role === "manager" || user?.role === "admin"),
       actorId: user?.userId,
     });
 
     return successResponse(
       collection,
-      "Delivery collection recorded and synchronized successfully",
+      "Cash collection recorded and queued for manager verification",
       undefined,
       201
     );

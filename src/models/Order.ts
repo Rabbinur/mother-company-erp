@@ -65,6 +65,9 @@ export interface IOrder extends Document {
   cancelledBy?: mongoose.Types.ObjectId;
   confirmedBy?: mongoose.Types.ObjectId;
   salesmanId?: mongoose.Types.ObjectId;
+  assignedDeliverymanId?: mongoose.Types.ObjectId;
+  deliveryStatus?: "pending" | "out_for_delivery" | "delivered" | "failed";
+  deliveryFailureReason?: string;
   notes?: string;
   createdBy?: mongoose.Types.ObjectId;
   createdAt: Date;
@@ -215,6 +218,14 @@ const OrderSchema = new Schema<IOrder>(
     cancelledBy: { type: Schema.Types.ObjectId, ref: "User" },
     confirmedBy: { type: Schema.Types.ObjectId, ref: "User" },
     salesmanId: { type: Schema.Types.ObjectId, ref: "User" },
+    assignedDeliverymanId: { type: Schema.Types.ObjectId, ref: "User", index: true },
+    deliveryStatus: {
+      type: String,
+      enum: ["pending", "out_for_delivery", "delivered", "failed"],
+      default: "pending",
+      index: true,
+    },
+    deliveryFailureReason: { type: String, trim: true },
     notes: { type: String, trim: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   },

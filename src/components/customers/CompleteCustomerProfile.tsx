@@ -37,8 +37,8 @@ export function CompleteCustomerProfile({ customerId }: { customerId: string }) 
     }
   };
 
-  const handleDownload = (section: string) => {
-    window.open(`/api/v1/customers/${customerId}/export?section=${section}`, "_blank");
+  const handleDownload = (section: string, format: "csv" | "xlsx" | "pdf" = "csv") => {
+    window.open(`/api/v1/customers/${customerId}/export?section=${section}&format=${format}`, "_blank");
   };
 
   if (loading) {
@@ -75,16 +75,31 @@ export function CompleteCustomerProfile({ customerId }: { customerId: string }) 
               BDT {profile.customer.currentReceivable?.toLocaleString() || 0}
             </span>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => handleDownload("all")}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
+              onClick={() => handleDownload("all", "xlsx")}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/50 bg-emerald-950/40 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-900/60 transition"
+              title="Download Full Excel Workbook (.xlsx)"
             >
-              <Download className="h-3.5 w-3.5" /> Full CSV
+              <Download className="h-3.5 w-3.5" /> Excel (.xlsx)
+            </button>
+            <button
+              onClick={() => handleDownload("all", "pdf")}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-700/50 bg-rose-950/40 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-900/60 transition"
+              title="Download PDF Statement (.pdf)"
+            >
+              <Download className="h-3.5 w-3.5" /> PDF
+            </button>
+            <button
+              onClick={() => handleDownload("all", "csv")}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700 transition"
+              title="Download Full CSV"
+            >
+              <Download className="h-3.5 w-3.5" /> CSV
             </button>
             <button
               onClick={() => window.print()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700 transition"
             >
               <Printer className="h-3.5 w-3.5" /> Print
             </button>

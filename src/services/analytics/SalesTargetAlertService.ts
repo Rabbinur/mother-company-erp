@@ -5,6 +5,7 @@ import { ProductVariant } from "@/models/ProductVariant";
 import { InventoryBalance } from "@/models/InventoryBalance";
 import { DeliveryCollection } from "@/models/DeliveryCollection";
 import { Notification } from "@/models/Notification";
+import { EmailProviderService } from "@/services/integrations/EmailProviderService";
 
 export interface TargetEvaluationResult {
   targetId: string;
@@ -99,6 +100,28 @@ export class SalesTargetAlertService {
           targetRole: "manager",
           link: "/analytics/sales",
         }).catch(() => {});
+
+        // Server-side email notification (non-blocking, idempotent)
+        try {
+          const emailMap: Record<string, "sales_target_behind" | "sales_target_achieved" | "sales_target_exceeded"> = {
+            BEHIND_TARGET_PACING: "sales_target_behind",
+            TARGET_ACHIEVED: "sales_target_achieved",
+            TARGET_EXCEEDED: "sales_target_exceeded",
+          };
+          const mappedType = emailMap[alertType];
+          if (mappedType) {
+            const adminEmail = process.env.ADMIN_ALERT_EMAIL || "manager@mothercompany.com";
+            await EmailProviderService.getInstance().sendEmail({
+              to: adminEmail,
+              subject: `[Sales Target Alert] ${target.title}: ${mappedType.replace(/_/g, " ").toUpperCase()}`,
+              text: `${target.title} is at ${percentage}% (BDT ${achievedAmount} of BDT ${target.targetAmount}).`,
+              alertType: mappedType,
+              idempotencyKey: `sales_target:${target._id}:${alertType}:${todayStr}`,
+            });
+          }
+        } catch {
+          // Failure to send email must never interrupt ERP operations
+        }
       }
 
       await target.save();
@@ -120,12 +143,18 @@ export class SalesTargetAlertService {
   }
 
   /**
-   * Daily sales summary & pending collection alerts
+   * Daily sales summary, low stock, out of stock & pending collection alerts
    */
   static async evaluateDailyOperationalAlerts(
     businessId: string | mongoose.Types.ObjectId
-  ): Promise<{ pendingCollectionsAmount: number; lowStockCount: number }> {
+  ): Promise<{
+    pendingCollectionsAmount: number;
+    lowStockCount: number;
+    outOfStockCount: number;
+  }> {
     const bId = new mongoose.Types.ObjectId(String(businessId));
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const adminEmail = process.env.ADMIN_ALERT_EMAIL || "admin@mothercompany.com";
 
     // 1. Pending deliveryman cash held
     const pendingCollections = await DeliveryCollection.find({
@@ -143,16 +172,56 @@ export class SalesTargetAlertService {
         targetRole: "accountant",
         link: "/delivery",
       }).catch(() => {});
+
+      try {
+        await EmailProviderService.getInstance().sendEmail({
+          to: adminEmail,
+          subject: "[Cash Alert] Un-deposited Delivery Collections Awaiting Reconciliation",
+          text: `Deliverymen currently hold BDT ${pendingCollectionsAmount} in un-deposited cash collections awaiting deposit reconciliation.`,
+          alertType: "pending_delivery_reconciliation",
+          idempotencyKey: `email:recon:${bId}:${todayStr}`,
+        });
+      } catch {}
     }
 
-    // 2. Low stock count
-    const balances = await InventoryBalance.find({
-      onHandQuantity: { $lte: 5 },
+    // 2. Out of stock balances
+    const outOfStockBalances = await InventoryBalance.find({
+      onHandQuantity: { $lte: 0 },
     }).limit(20).lean();
+
+    if (outOfStockBalances.length > 0) {
+      try {
+        await EmailProviderService.getInstance().sendEmail({
+          to: adminEmail,
+          subject: `[Inventory Alert] ${outOfStockBalances.length} Product(s) Out of Stock`,
+          text: `${outOfStockBalances.length} item(s) are completely out of stock. Immediate replenishment recommended.`,
+          alertType: "product_out_of_stock",
+          idempotencyKey: `email:out_of_stock:${bId}:${todayStr}`,
+        });
+      } catch {}
+    }
+
+    // 3. Low stock balances (1-5 units)
+    const lowStockBalances = await InventoryBalance.find({
+      onHandQuantity: { $gt: 0, $lte: 5 },
+    }).limit(20).lean();
+
+    if (lowStockBalances.length > 0) {
+      try {
+        await EmailProviderService.getInstance().sendEmail({
+          to: adminEmail,
+          subject: `[Inventory Alert] ${lowStockBalances.length} Product(s) Low Stock`,
+          text: `${lowStockBalances.length} item(s) are running low in stock (<= 5 units remaining).`,
+          alertType: "product_low_stock",
+          idempotencyKey: `email:low_stock:${bId}:${todayStr}`,
+        });
+      } catch {}
+    }
 
     return {
       pendingCollectionsAmount,
-      lowStockCount: balances.length,
+      lowStockCount: lowStockBalances.length,
+      outOfStockCount: outOfStockBalances.length,
     };
   }
 }

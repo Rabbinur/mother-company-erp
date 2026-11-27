@@ -13,9 +13,11 @@ export interface IDeliveryCollection extends Document {
   collectionId: string; // Globally unique ID (e.g. COL-1732688000-xxxx)
   businessId: mongoose.Types.ObjectId;
   dealershipId: mongoose.Types.ObjectId;
-  orderId: mongoose.Types.ObjectId;
+  orderId?: mongoose.Types.ObjectId;
   customerId: mongoose.Types.ObjectId;
-  deliverymanId: mongoose.Types.ObjectId;
+  deliverymanId?: mongoose.Types.ObjectId;
+  salesmanId?: mongoose.Types.ObjectId;
+  collectorRole?: "deliveryman" | "salesman";
   dispatchId?: mongoose.Types.ObjectId;
   amount: number;
   paymentMethod: "cash" | "bkash" | "nagad" | "bank_transfer" | "other";
@@ -59,7 +61,6 @@ const DeliveryCollectionSchema = new Schema<IDeliveryCollection>(
     orderId: {
       type: Schema.Types.ObjectId,
       ref: "Order",
-      required: true,
       index: true,
     },
     customerId: {
@@ -71,7 +72,17 @@ const DeliveryCollectionSchema = new Schema<IDeliveryCollection>(
     deliverymanId: {
       type: Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      index: true,
+    },
+    salesmanId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
+    collectorRole: {
+      type: String,
+      enum: ["deliveryman", "salesman"],
+      default: "deliveryman",
       index: true,
     },
     dispatchId: {

@@ -15,6 +15,11 @@ export async function GET(
   const user = await requireAuth(req);
   if (!user) return unauthorizedResponse();
 
+  // STRICT SECURITY: Salesmen & deliverymen must NEVER see customer financial ledgers, dues, or credit limits
+  if (user.role === "sales_staff" || user.role === "salesman" || user.role === "deliveryman") {
+    return errorResponse("Forbidden: Field sales and delivery staff are not permitted to view customer financial records", 403);
+  }
+
   const { id } = await params;
   const dealershipId = req.nextUrl.searchParams.get("dealershipId") || user.dealershipId;
 
