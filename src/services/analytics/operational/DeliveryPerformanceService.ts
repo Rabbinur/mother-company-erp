@@ -32,6 +32,7 @@ export class DeliveryPerformanceService {
     let pendingCount = 0;
     let failedCount = 0;
     let rejectedCount = 0;
+    let cancelledCount = 0;
 
     let totalLoadedQuantity = 0;
     let totalDeliveredQuantity = 0;
@@ -48,6 +49,7 @@ export class DeliveryPerformanceService {
       delivered: number;
       failed: number;
       rejected: number;
+      cancelled: number;
       totalMs: number;
       tripsTimed: number;
     }>();
@@ -57,10 +59,11 @@ export class DeliveryPerformanceService {
       assigned: number;
       delivered: number;
       returned: number;
+      cancelled: number;
     }>();
 
     for (const d of dispatches) {
-      // Dispatches completion duration
+      // Dispatch-level route trip duration (from vehicle departure to return/completion)
       if (d.startedAt && d.completedAt) {
         const ms = new Date(d.completedAt).getTime() - new Date(d.startedAt).getTime();
         if (ms > 0) {
@@ -84,6 +87,7 @@ export class DeliveryPerformanceService {
           delivered: 0,
           failed: 0,
           rejected: 0,
+          cancelled: 0,
           totalMs: 0,
           tripsTimed: 0,
         });
@@ -107,29 +111,36 @@ export class DeliveryPerformanceService {
             assigned: 0,
             delivered: 0,
             returned: 0,
+            cancelled: 0,
           });
         }
         const dEntry = dealershipStatsMap.get(dId)!;
         dEntry.assigned++;
 
-        if (stop.status === "delivered") {
+        const stopStatus = (stop.status || "").toLowerCase();
+        if (stopStatus === "delivered") {
           fulfilledCount++;
           dmanEntry.delivered++;
           dEntry.delivered++;
-        } else if (stop.status === "partially_delivered") {
+        } else if (stopStatus === "partially_delivered") {
           partialCount++;
-        } else if (stop.status === "pending") {
+        } else if (stopStatus === "pending") {
           pendingCount++;
-        } else if (stop.status === "failed") {
+        } else if (stopStatus === "failed") {
           failedCount++;
           dmanEntry.failed++;
-        } else if (stop.status === "rejected") {
+        } else if (stopStatus === "rejected") {
           rejectedCount++;
           dmanEntry.rejected++;
+        } else if (stopStatus === "cancelled") {
+          // Cancelled orders prior to or at dispatch are not delivery failures
+          cancelledCount++;
+          dmanEntry.cancelled++;
+          dEntry.cancelled++;
         }
       }
 
-      // Quantity tracking
+      // Cargo quantity accounting
       for (const it of d.items || []) {
         if (params.dealershipId && String(it.dealershipId) !== String(params.dealershipId)) {
           continue;
@@ -147,46 +158,61 @@ export class DeliveryPerformanceService {
       }
     }
 
-    const successRate = totalOrdersAssigned > 0
-      ? Number(((fulfilledCount / totalOrdersAssigned) * 100).toFixed(2))
+    // Success rate denominator: eligible assigned stops excludes cancelled stops
+    const eligibleOrdersAssigned = Math.max(0, totalOrdersAssigned - cancelledCount);
+    const successRate = eligibleOrdersAssigned > 0
+      ? Number(((fulfilledCount / eligibleOrdersAssigned) * 100).toFixed(2))
       : 0;
 
-    const avgCompletionHours = completedTimedTrips > 0
+    const avgTripCompletionHours = completedTimedTrips > 0
       ? Number((totalCompletionMs / completedTimedTrips / (1000 * 60 * 60)).toFixed(2))
       : null;
 
-    const deliverymanPerformance = Array.from(deliverymanMap.entries()).map(([id, st]) => ({
-      deliverymanId: id,
-      deliverymanName: st.name,
-      assignedStops: st.assigned,
-      deliveredStops: st.delivered,
-      failedStops: st.failed,
-      rejectedStops: st.rejected,
-      successRate: st.assigned > 0 ? Number(((st.delivered / st.assigned) * 100).toFixed(2)) : 0,
-      avgCompletionHours: st.tripsTimed > 0
-        ? Number((st.totalMs / st.tripsTimed / (1000 * 60 * 60)).toFixed(2))
-        : null,
-    }));
+    const deliverymanPerformance = Array.from(deliverymanMap.entries()).map(([id, st]) => {
+      const eligible = Math.max(0, st.assigned - st.cancelled);
+      return {
+        deliverymanId: id,
+        deliverymanName: st.name,
+        assignedStops: st.assigned,
+        eligibleStops: eligible,
+        deliveredStops: st.delivered,
+        failedStops: st.failed,
+        rejectedStops: st.rejected,
+        cancelledStops: st.cancelled,
+        successRate: eligible > 0 ? Number(((st.delivered / eligible) * 100).toFixed(2)) : 0,
+        avgCompletionHours: st.tripsTimed > 0
+          ? Number((st.totalMs / st.tripsTimed / (1000 * 60 * 60)).toFixed(2))
+          : null,
+      };
+    });
 
-    const dealershipPerformance = Array.from(dealershipStatsMap.entries()).map(([id, st]) => ({
-      dealershipId: id,
-      dealershipName: st.name,
-      assignedStops: st.assigned,
-      deliveredStops: st.delivered,
-      returnedQuantity: st.returned,
-      successRate: st.assigned > 0 ? Number(((st.delivered / st.assigned) * 100).toFixed(2)) : 0,
-    }));
+    const dealershipPerformance = Array.from(dealershipStatsMap.entries()).map(([id, st]) => {
+      const eligible = Math.max(0, st.assigned - st.cancelled);
+      return {
+        dealershipId: id,
+        dealershipName: st.name,
+        assignedStops: st.assigned,
+        eligibleStops: eligible,
+        deliveredStops: st.delivered,
+        returnedQuantity: st.returned,
+        successRate: eligible > 0 ? Number(((st.delivered / eligible) * 100).toFixed(2)) : 0,
+      };
+    });
 
     return {
       totalOrdersAssigned,
+      eligibleOrdersAssigned,
+      cancelledDeliveriesCount: cancelledCount,
       fulfilledDeliveriesCount: fulfilledCount,
       partiallyFulfilledCount: partialCount,
       pendingDeliveriesCount: pendingCount,
       failedDeliveriesCount: failedCount,
       rejectedDeliveriesCount: rejectedCount,
       deliverySuccessRatePercentage: successRate,
-      averageDeliveryCompletionHours: avgCompletionHours,
-      promisedDeadlineCompliance: "NOT_CONFIGURED", // Explicitly unconfigured as no promised deadline model exists
+      averageTripCompletionHours: avgTripCompletionHours,
+      averageDeliveryCompletionHours: avgTripCompletionHours,
+      stopDeliveryDuration: "NOT_CONFIGURED",
+      promisedDeadlineCompliance: "NOT_CONFIGURED",
       totalLoadedQuantity,
       totalDeliveredQuantity,
       totalReturnedQuantity,

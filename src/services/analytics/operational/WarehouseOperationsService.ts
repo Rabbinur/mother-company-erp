@@ -50,7 +50,7 @@ export class WarehouseOperationsService {
       StockBatch.find(batchQuery).lean(),
     ]);
 
-    // 1. GRN Receiving
+    // 1. GRN Receiving & Verification
     let totalGrnsReceived = grns.length;
     let verifiedGrnsCount = 0;
     let pendingVerificationCount = 0;
@@ -83,12 +83,14 @@ export class WarehouseOperationsService {
       ? Number((totalVerificationMs / verifiedCountWithTimestamps / (1000 * 60 * 60)).toFixed(1))
       : null;
 
-    // 2. Dispatch Readiness
+    // 2. Dispatch Readiness & Day-End Reconciliation
     let pendingDispatchCount = 0;
     let readyForDispatchCount = 0;
     let loadedCount = 0;
     let inTransitCount = 0;
     let dayEndReconciliationsCount = 0;
+    let completedReconciliationsCount = 0;
+    let incompleteReconciliationsCount = 0;
     let dispatchesWithVarianceCount = 0;
 
     for (const d of dispatches) {
@@ -99,13 +101,36 @@ export class WarehouseOperationsService {
 
       if (d.reconciliation) {
         dayEndReconciliationsCount++;
-        const hasVariance =
-          !d.reconciliation.isStockBalanced ||
-          (d.reconciliation.stockVariance && d.reconciliation.stockVariance !== 0) ||
-          (d.reconciliation.cashDifference && d.reconciliation.cashDifference !== 0);
-        if (hasVariance) {
-          dispatchesWithVarianceCount++;
+        const rec = d.reconciliation;
+        const hasStockVariance = typeof rec.stockVariance === "number";
+        const hasCashDiff = typeof rec.cashDifference === "number";
+        const hasBalanced = typeof rec.isStockBalanced === "boolean";
+
+        const hasEvidence = hasStockVariance || hasCashDiff || hasBalanced;
+
+        if (!hasEvidence) {
+          // Missing/undefined evidence must NOT automatically trigger discrepancy alerts
+          incompleteReconciliationsCount++;
+        } else {
+          completedReconciliationsCount++;
+          // Confirmed variance exists ONLY if non-zero variance or explicitly unbalanced
+          const isStockUnbalanced = hasBalanced && rec.isStockBalanced === false;
+          const hasNonZeroStockVariance = hasStockVariance && rec.stockVariance !== 0;
+          const hasNonZeroCashDiff = hasCashDiff && rec.cashDifference !== 0;
+
+          if (isStockUnbalanced || hasNonZeroStockVariance || hasNonZeroCashDiff) {
+            dispatchesWithVarianceCount++;
+          }
         }
+      }
+    }
+
+    let reconciliationStatus: "CONFIGURED" | "INCOMPLETE" | "NOT_CONFIGURED" = "NOT_CONFIGURED";
+    if (dayEndReconciliationsCount > 0) {
+      if (completedReconciliationsCount > 0 && incompleteReconciliationsCount === 0) {
+        reconciliationStatus = "CONFIGURED";
+      } else {
+        reconciliationStatus = "INCOMPLETE";
       }
     }
 
@@ -160,7 +185,10 @@ export class WarehouseOperationsService {
       quarantinedBatchesCount,
       quarantinedQuantity,
       dayEndReconciliationsCount,
+      completedReconciliationsCount,
+      incompleteReconciliationsCount,
       dispatchesWithVarianceCount,
+      reconciliationStatus,
     };
   }
 }

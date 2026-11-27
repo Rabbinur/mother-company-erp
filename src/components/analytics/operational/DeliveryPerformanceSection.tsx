@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { CheckCircle2, Clock, AlertTriangle, XCircle, Info, Truck } from "lucide-react";
+import { CheckCircle2, Clock, AlertTriangle, XCircle, Info, Truck, Ban } from "lucide-react";
 import type { DeliveryPerformanceData } from "@/services/analytics/operational/types";
 
 interface Props {
@@ -11,16 +11,20 @@ interface Props {
 export function DeliveryPerformanceSection({ data }: Props) {
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
             <Truck className="w-4 h-4 text-primary" /> Delivery Performance Intelligence
           </h3>
           <p className="text-xs text-muted-foreground">
-            Fulfillment outcomes, stop success rates, and delivery team productivity based on verified records.
+            Stop fulfillment outcomes, eligible success rate, route trip duration, and delivery team records.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs px-2.5 py-1 rounded-full bg-muted border border-border font-medium text-muted-foreground flex items-center gap-1.5">
+            <Info className="w-3.5 h-3.5" />
+            Stop Duration: <span className="font-semibold text-foreground">{data.stopDeliveryDuration}</span>
+          </span>
           <span className="text-xs px-2.5 py-1 rounded-full bg-muted border border-border font-medium text-muted-foreground flex items-center gap-1.5">
             <Info className="w-3.5 h-3.5" />
             Promised Deadline: <span className="font-semibold text-foreground">{data.promisedDeadlineCompliance}</span>
@@ -29,7 +33,7 @@ export function DeliveryPerformanceSection({ data }: Props) {
       </div>
 
       {/* Outcome Breakdown & Volume Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         <div className="p-3 rounded-lg border border-border bg-card">
           <div className="text-xs text-muted-foreground flex items-center gap-1">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Fulfilled Stops
@@ -38,7 +42,7 @@ export function DeliveryPerformanceSection({ data }: Props) {
         </div>
         <div className="p-3 rounded-lg border border-border bg-card">
           <div className="text-xs text-muted-foreground flex items-center gap-1">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> Partially Fulfilled
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> Partial Fulfilled
           </div>
           <div className="text-lg font-bold text-foreground mt-1">{data.partiallyFulfilledCount}</div>
         </div>
@@ -56,16 +60,22 @@ export function DeliveryPerformanceSection({ data }: Props) {
         </div>
         <div className="p-3 rounded-lg border border-border bg-card">
           <div className="text-xs text-muted-foreground flex items-center gap-1">
-            <XCircle className="w-3.5 h-3.5 text-purple-500" /> Customer Rejections
+            <XCircle className="w-3.5 h-3.5 text-purple-500" /> Rejections
           </div>
           <div className="text-lg font-bold text-foreground mt-1">{data.rejectedDeliveriesCount}</div>
+        </div>
+        <div className="p-3 rounded-lg border border-border bg-card">
+          <div className="text-xs text-muted-foreground flex items-center gap-1">
+            <Ban className="w-3.5 h-3.5 text-slate-500" /> Cancelled Stops
+          </div>
+          <div className="text-lg font-bold text-foreground mt-1">{data.cancelledDeliveriesCount}</div>
         </div>
         <div className="p-3 rounded-lg border border-border bg-card">
           <div className="text-xs text-muted-foreground flex items-center gap-1">
             <Clock className="w-3.5 h-3.5 text-indigo-500" /> Avg Trip Duration
           </div>
           <div className="text-lg font-bold text-foreground mt-1">
-            {data.averageDeliveryCompletionHours !== null ? `${data.averageDeliveryCompletionHours}h` : "N/A"}
+            {data.averageTripCompletionHours !== null ? `${data.averageTripCompletionHours}h` : "N/A"}
           </div>
         </div>
       </div>
@@ -104,7 +114,7 @@ export function DeliveryPerformanceSection({ data }: Props) {
         {/* Deliveryman Performance */}
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="p-3 border-b border-border bg-muted/40 font-semibold text-xs text-foreground">
-            Delivery Staff Performance
+            Delivery Staff Performance (Eligible Stop Basis)
           </div>
           <div className="overflow-x-auto max-h-64">
             <table className="w-full text-xs text-left">
@@ -112,21 +122,23 @@ export function DeliveryPerformanceSection({ data }: Props) {
                 <tr>
                   <th className="p-2.5">Staff</th>
                   <th className="p-2.5 text-right">Assigned</th>
+                  <th className="p-2.5 text-right">Eligible</th>
                   <th className="p-2.5 text-right">Delivered</th>
                   <th className="p-2.5 text-right">Success</th>
-                  <th className="p-2.5 text-right">Avg Time</th>
+                  <th className="p-2.5 text-right">Trip Duration</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {data.deliverymanPerformance.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-4 text-center text-muted-foreground">No delivery records found</td>
+                    <td colSpan={6} className="p-4 text-center text-muted-foreground">No delivery records found</td>
                   </tr>
                 ) : (
                   data.deliverymanPerformance.map((dm) => (
                     <tr key={dm.deliverymanId} className="hover:bg-muted/30">
                       <td className="p-2.5 font-medium text-foreground">{dm.deliverymanName}</td>
-                      <td className="p-2.5 text-right">{dm.assignedStops}</td>
+                      <td className="p-2.5 text-right text-muted-foreground">{dm.assignedStops}</td>
+                      <td className="p-2.5 text-right">{dm.eligibleStops}</td>
                       <td className="p-2.5 text-right text-emerald-600 font-medium">{dm.deliveredStops}</td>
                       <td className="p-2.5 text-right">
                         <span className={`px-1.5 py-0.5 rounded font-semibold ${dm.successRate >= 85 ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" : "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"}`}>
@@ -154,7 +166,7 @@ export function DeliveryPerformanceSection({ data }: Props) {
               <thead className="bg-muted/20 text-muted-foreground uppercase text-[10px]">
                 <tr>
                   <th className="p-2.5">Dealership</th>
-                  <th className="p-2.5 text-right">Stops</th>
+                  <th className="p-2.5 text-right">Eligible</th>
                   <th className="p-2.5 text-right">Delivered</th>
                   <th className="p-2.5 text-right">Returned Qty</th>
                   <th className="p-2.5 text-right">Success Rate</th>
@@ -169,7 +181,7 @@ export function DeliveryPerformanceSection({ data }: Props) {
                   data.dealershipPerformance.map((dp) => (
                     <tr key={dp.dealershipId} className="hover:bg-muted/30">
                       <td className="p-2.5 font-medium text-foreground">{dp.dealershipName}</td>
-                      <td className="p-2.5 text-right">{dp.assignedStops}</td>
+                      <td className="p-2.5 text-right">{dp.eligibleStops}</td>
                       <td className="p-2.5 text-right text-emerald-600 font-medium">{dp.deliveredStops}</td>
                       <td className="p-2.5 text-right text-amber-600">{dp.returnedQuantity}</td>
                       <td className="p-2.5 text-right">

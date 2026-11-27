@@ -24,7 +24,7 @@ export class OperationalBottleneckService {
         type: params.delivery.deliverySuccessRatePercentage < 70 ? "critical" : "warning",
         domain: "delivery",
         issue: `Suboptimal delivery fulfillment rate (${params.delivery.deliverySuccessRatePercentage}%)`,
-        supportingMetric: `${params.delivery.fulfilledDeliveriesCount} fulfilled of ${params.delivery.totalOrdersAssigned} assigned stops`,
+        supportingMetric: `${params.delivery.fulfilledDeliveriesCount} fulfilled of ${params.delivery.eligibleOrdersAssigned} eligible stops`,
         suggestedAction: "Audit frequent delivery failures and route stop sequences to reduce unfulfilled drops.",
       });
     }

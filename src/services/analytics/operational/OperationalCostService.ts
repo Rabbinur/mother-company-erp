@@ -52,38 +52,56 @@ export class OperationalCostService {
       Claim.find(claimQuery).lean(),
     ]);
 
-    let totalDeliveryExpenses = 0;
+    let totalTripExpenses = 0;
+    let dealershipScopedExpenses = 0;
     let workerHandlingCostTotal = 0;
     const tripExpenseTypeBreakdown: Record<string, number> = {};
     const dealershipAllocationMap = new Map<string, number>();
 
     for (const d of dispatches) {
-      // Expenses
       for (const exp of d.expenses || []) {
         const amt = exp.amount || 0;
-        totalDeliveryExpenses += amt;
+        totalTripExpenses += amt;
         const eType = exp.expenseType || "other";
         tripExpenseTypeBreakdown[eType] = (tripExpenseTypeBreakdown[eType] || 0) + amt;
 
+        // Allocation logic: explicit route allocations take precedence over proportional splits
         if (exp.dealershipAllocations && exp.dealershipAllocations.length > 0) {
           for (const alloc of exp.dealershipAllocations) {
+            const allocAmt = alloc.amount || 0;
             const dKey = String(alloc.dealershipId);
-            dealershipAllocationMap.set(dKey, (dealershipAllocationMap.get(dKey) || 0) + (alloc.amount || 0));
+            dealershipAllocationMap.set(dKey, (dealershipAllocationMap.get(dKey) || 0) + allocAmt);
+            if (params.dealershipId && dKey === String(params.dealershipId)) {
+              dealershipScopedExpenses += allocAmt;
+            }
           }
         } else if (d.dealershipIds && d.dealershipIds.length > 0) {
-          const splitAmt = amt / d.dealershipIds.length;
-          for (const dId of d.dealershipIds) {
+          // Proportional allocation reconciling exactly to original allocatable expense without double counting
+          const n = d.dealershipIds.length;
+          const baseSplit = Math.floor((amt / n) * 100) / 100;
+          const remainder = Number((amt - baseSplit * n).toFixed(2));
+
+          d.dealershipIds.forEach((dId, idx) => {
+            const allocAmt = Number((baseSplit + (idx === 0 ? remainder : 0)).toFixed(2));
             const dKey = String(dId);
-            dealershipAllocationMap.set(dKey, (dealershipAllocationMap.get(dKey) || 0) + splitAmt);
-          }
+            dealershipAllocationMap.set(dKey, (dealershipAllocationMap.get(dKey) || 0) + allocAmt);
+            if (params.dealershipId && dKey === String(params.dealershipId)) {
+              dealershipScopedExpenses += allocAmt;
+            }
+          });
         }
       }
 
-      // Worker handling costs
+      // Worker compensation
       for (const w of d.workers || []) {
         workerHandlingCostTotal += w.totalAmount || 0;
       }
     }
+
+    // Scoped delivery expenses: for a dealership filter, use strictly its allocated portion
+    const totalDeliveryExpenses = params.dealershipId
+      ? Number(dealershipScopedExpenses.toFixed(2))
+      : Number(totalTripExpenses.toFixed(2));
 
     // Principal Reimbursement Claims
     let pendingClaimsCount = 0;
@@ -124,7 +142,7 @@ export class OperationalCostService {
     });
 
     return {
-      totalDeliveryExpenses: Number(totalDeliveryExpenses.toFixed(2)),
+      totalDeliveryExpenses,
       costPerFulfilledOrder,
       costPerDeliveredUnit,
       allocatedDeliveryCostByDealership,

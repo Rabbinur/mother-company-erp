@@ -28,18 +28,31 @@ export class WorkerIntelligenceService {
     let unloadingTasksCount = 0;
     let completedAssignmentsCount = 0;
     let pendingAssignmentsCount = 0;
+    let totalUniqueCargoHandled = 0;
 
     const workerStatsMap = new Map<string, {
       workerName: string;
       assignmentsCount: number;
       loadingCount: number;
       unloadingCount: number;
-      totalQuantityHandled: number;
+      recordedQuantity: number;
+      hasMissingQuantity: boolean;
       totalCompensationEarned: number;
     }>();
 
     for (const d of dispatches) {
-      for (const w of d.workers || []) {
+      const assignedWorkers = d.workers || [];
+      if (assignedWorkers.length > 0) {
+        // Unique dispatch physical cargo handled (not multiplied per worker)
+        let dCargo = 0;
+        for (const it of d.items || []) {
+          if (params.dealershipId && String(it.dealershipId) !== String(params.dealershipId)) continue;
+          dCargo += (it.deliveredQuantity || it.loadedQuantity || 0);
+        }
+        totalUniqueCargoHandled += dCargo;
+      }
+
+      for (const w of assignedWorkers) {
         if (params.workerId && w.workerName !== params.workerId && w.workerPhone !== params.workerId) {
           continue;
         }
@@ -65,7 +78,8 @@ export class WorkerIntelligenceService {
             assignmentsCount: 0,
             loadingCount: 0,
             unloadingCount: 0,
-            totalQuantityHandled: 0,
+            recordedQuantity: 0,
+            hasMissingQuantity: false,
             totalCompensationEarned: 0,
           });
         }
@@ -74,27 +88,43 @@ export class WorkerIntelligenceService {
         entry.assignmentsCount++;
         if (isLoad) entry.loadingCount++;
         if (isUnload) entry.unloadingCount++;
-        entry.totalQuantityHandled += w.quantity || 0;
         entry.totalCompensationEarned += w.totalAmount || 0;
+
+        // Individual worker quantity tracking: only record if genuine quantity is recorded on worker record
+        if (typeof w.quantity === "number" && !isNaN(w.quantity) && w.quantity >= 0) {
+          entry.recordedQuantity += w.quantity;
+        } else {
+          // If individual worker quantity is unavailable, do NOT invent an artificial allocation
+          entry.hasMissingQuantity = true;
+        }
       }
     }
 
-    const workerOverview = Array.from(workerStatsMap.values()).map((w) => ({
-      workerName: w.workerName,
-      assignmentsCount: w.assignmentsCount,
-      loadingCount: w.loadingCount,
-      unloadingCount: w.unloadingCount,
-      totalQuantityHandled: w.totalQuantityHandled,
-      totalCompensationEarned: params.canViewCosts ? w.totalCompensationEarned : null,
-    }));
+    const workerOverview = Array.from(workerStatsMap.values()).map((w) => {
+      // If individual worker quantities were not recorded, report NOT_CONFIGURED
+      const totalQuantityHandled: number | "NOT_CONFIGURED" =
+        w.hasMissingQuantity && w.recordedQuantity === 0
+          ? "NOT_CONFIGURED"
+          : w.recordedQuantity;
+
+      return {
+        workerName: w.workerName,
+        assignmentsCount: w.assignmentsCount,
+        loadingCount: w.loadingCount,
+        unloadingCount: w.unloadingCount,
+        totalQuantityHandled,
+        totalCompensationEarned: params.canViewCosts ? w.totalCompensationEarned : null,
+      };
+    });
 
     return {
       totalWorkerAssignments,
+      totalUniqueCargoHandled,
       loadingTasksCount,
       unloadingTasksCount,
       completedAssignmentsCount,
       pendingAssignmentsCount,
-      recordedWorkDuration: "NOT_CONFIGURED", // Shift/attendance duration not tracked in schema
+      recordedWorkDuration: "NOT_CONFIGURED",
       workerOverview,
     };
   }

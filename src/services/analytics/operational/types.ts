@@ -16,13 +16,17 @@ export interface OperationalFilterParams {
 
 export interface DeliveryPerformanceData {
   totalOrdersAssigned: number;
+  eligibleOrdersAssigned: number;
+  cancelledDeliveriesCount: number;
   fulfilledDeliveriesCount: number;
   partiallyFulfilledCount: number;
   pendingDeliveriesCount: number;
   failedDeliveriesCount: number;
   rejectedDeliveriesCount: number;
   deliverySuccessRatePercentage: number;
-  averageDeliveryCompletionHours: number | null;
+  averageTripCompletionHours: number | null;
+  averageDeliveryCompletionHours: number | null; // Backwards-compatible alias to trip completion
+  stopDeliveryDuration: "NOT_CONFIGURED";
   promisedDeadlineCompliance: "NOT_CONFIGURED";
   totalLoadedQuantity: number;
   totalDeliveredQuantity: number;
@@ -33,9 +37,11 @@ export interface DeliveryPerformanceData {
     deliverymanId: string;
     deliverymanName: string;
     assignedStops: number;
+    eligibleStops: number;
     deliveredStops: number;
     failedStops: number;
     rejectedStops: number;
+    cancelledStops: number;
     successRate: number;
     avgCompletionHours: number | null;
   }>;
@@ -43,6 +49,7 @@ export interface DeliveryPerformanceData {
     dealershipId: string;
     dealershipName: string;
     assignedStops: number;
+    eligibleStops: number;
     deliveredStops: number;
     returnedQuantity: number;
     successRate: number;
@@ -62,7 +69,7 @@ export interface VehicleTripData {
     tripsCount: number;
     stopsDelivered: number;
     quantityDelivered: number;
-    totalTripExpenses: number | null; // masked if unauthorized
+    totalTripExpenses: number | null;
     capacityUtilization: "NOT_CONFIGURED" | number;
   }>;
 }
@@ -90,11 +97,15 @@ export interface WarehouseOperationsData {
   quarantinedBatchesCount: number;
   quarantinedQuantity: number;
   dayEndReconciliationsCount: number;
+  completedReconciliationsCount: number;
+  incompleteReconciliationsCount: number;
   dispatchesWithVarianceCount: number;
+  reconciliationStatus: "CONFIGURED" | "INCOMPLETE" | "NOT_CONFIGURED";
 }
 
 export interface WorkerIntelligenceData {
   totalWorkerAssignments: number;
+  totalUniqueCargoHandled: number;
   loadingTasksCount: number;
   unloadingTasksCount: number;
   completedAssignmentsCount: number;
@@ -105,8 +116,8 @@ export interface WorkerIntelligenceData {
     assignmentsCount: number;
     loadingCount: number;
     unloadingCount: number;
-    totalQuantityHandled: number;
-    totalCompensationEarned: number | null; // masked if unauthorized
+    totalQuantityHandled: number | "NOT_CONFIGURED";
+    totalCompensationEarned: number | null;
   }>;
 }
 
@@ -153,5 +164,71 @@ export interface OperationalIntelligencePayload {
   workerIntelligence: WorkerIntelligenceData;
   operationalCosts: OperationalCostData;
   bottlenecksAndRecommendations: OperationalRecommendation[];
+  generatedAt: Date;
+}
+
+export interface DeliveryReportStopItem {
+  stopSequence: number;
+  orderNumber: string;
+  customerName: string;
+  shopName?: string;
+  address?: string;
+  status: string;
+  deliveredAt?: Date | null;
+  failureReason?: string;
+  cashCollected: number;
+}
+
+export interface DeliveryReportTripItem {
+  dispatchId: string;
+  dispatchNumber: string;
+  tripDate: Date;
+  status: string;
+  vehicleNumber: string;
+  deliverymanName: string;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  tripDurationMinutes: number | null;
+  dealershipNames: string[];
+  totalStops: number;
+  fulfilledStops: number;
+  partialStops: number;
+  failedStops: number;
+  rejectedStops: number;
+  cancelledStops: number;
+  loadedQuantity: number;
+  deliveredQuantity: number;
+  returnedQuantity: number;
+  damagedQuantity: number;
+  undeliveredQuantity: number;
+  deliveryExpenses: number | null;
+  reconciliationDiscrepancy: boolean;
+  reconciliationNotes?: string;
+  stops: DeliveryReportStopItem[];
+}
+
+export interface DeliveryReportPayload {
+  reportTitle: string;
+  filterScope: {
+    businessId: string;
+    dealershipId?: string;
+    startDate: Date;
+    endDate: Date;
+  };
+  summary: {
+    totalTrips: number;
+    totalAssignedStops: number;
+    eligibleStops: number;
+    fulfilledStops: number;
+    cancelledStops: number;
+    deliverySuccessRate: number;
+    totalLoadedQuantity: number;
+    totalDeliveredQuantity: number;
+    totalReturnedQuantity: number;
+    totalUndeliveredQuantity: number;
+    totalDeliveryExpenses: number | null;
+    averageTripDurationMinutes: number | null;
+  };
+  trips: DeliveryReportTripItem[];
   generatedAt: Date;
 }

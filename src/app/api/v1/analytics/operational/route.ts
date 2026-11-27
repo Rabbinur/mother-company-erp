@@ -60,6 +60,21 @@ export async function GET(req: NextRequest) {
 
     const canViewCosts = canUserViewPurchaseCost(user);
 
+    if (domain === "delivery_report") {
+      const payload = await OperationalAnalyticsService.getDeliveryReport({
+        businessId,
+        dealershipId,
+        warehouseId: warehouseId === "all" ? undefined : warehouseId,
+        vehicleId: vehicleId === "all" ? undefined : vehicleId,
+        deliverymanId: deliverymanId === "all" ? undefined : deliverymanId,
+        periodPreset,
+        startDate,
+        endDate,
+        canViewCosts,
+      });
+      return successResponse(payload, "Delivery operational report retrieved successfully");
+    }
+
     if (domain === "operations") {
       const payload = await OperationalAnalyticsService.getOperationalIntelligence({
         businessId,

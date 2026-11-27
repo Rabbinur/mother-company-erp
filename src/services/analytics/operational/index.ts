@@ -5,3 +5,4 @@ export * from "./WarehouseOperationsService";
 export * from "./WorkerIntelligenceService";
 export * from "./OperationalCostService";
 export * from "./OperationalBottleneckService";
+export * from "./DeliveryReportService";

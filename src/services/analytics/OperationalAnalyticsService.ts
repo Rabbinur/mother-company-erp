@@ -14,14 +14,20 @@ import {
   WorkerIntelligenceService,
   OperationalCostService,
   OperationalBottleneckService,
+  DeliveryReportService,
   type OperationalFilterParams,
   type OperationalIntelligencePayload,
+  type DeliveryReportPayload,
 } from "./operational";
 
 export class OperationalAnalyticsService {
-  /**
-   * Orchestrates comprehensive Advanced Business Intelligence analytics across commercial domains.
-   */
+  private static async getDealershipMap(bId: mongoose.Types.ObjectId, dId?: mongoose.Types.ObjectId) {
+    const items = await Dealership.find({ businessId: bId, status: "active", ...(dId ? { _id: dId } : {}) }).lean();
+    const map = new Map<string, { name: string; code: string }>();
+    items.forEach((d) => map.set(String(d._id), { name: d.name, code: d.code }));
+    return map;
+  }
+
   static async getOperationalAnalytics(params: {
     businessId: string | mongoose.Types.ObjectId;
     dealershipId?: string | mongoose.Types.ObjectId;
@@ -34,115 +40,45 @@ export class OperationalAnalyticsService {
   }): Promise<OperationalAnalyticsPayload> {
     const bId = new mongoose.Types.ObjectId(String(params.businessId));
     const dId = params.dealershipId ? new mongoose.Types.ObjectId(String(params.dealershipId)) : undefined;
-    const pCompId = params.principalCompanyId
-      ? new mongoose.Types.ObjectId(String(params.principalCompanyId))
-      : undefined;
+    const pCompId = params.principalCompanyId ? new mongoose.Types.ObjectId(String(params.principalCompanyId)) : undefined;
 
     const dateRange = DashboardDateHelper.parseDateRange({
       preset: params.periodPreset || "last_30_days",
       startDate: params.startDate,
       endDate: params.endDate,
     });
-
-    const dateFilter: AnalyticsDateFilter = {
-      startDate: dateRange.startDate,
-      endDate: dateRange.endDate,
-      period: dateRange.preset,
-    };
-
+    const dateFilter: AnalyticsDateFilter = { startDate: dateRange.startDate, endDate: dateRange.endDate, period: dateRange.preset };
     const canViewCosts = params.canViewCosts !== false;
     const domain = params.domain || "all";
+    const dealershipMap = await this.getDealershipMap(bId, dId);
 
-    const dealerships = await Dealership.find({
-      businessId: bId,
-      status: "active",
-      ...(dId ? { _id: dId } : {}),
-    }).lean();
-
-    const dealershipMap = new Map<string, { name: string; code: string }>();
-    dealerships.forEach((d) => {
-      dealershipMap.set(String(d._id), { name: d.name, code: d.code });
-    });
-
-    let productIntelligence: OperationalAnalyticsPayload["productIntelligence"] = {
-      products: [],
-      fastMoving: [],
-      slowMoving: [],
-      topReturnRates: [],
-    };
+    let productIntelligence: OperationalAnalyticsPayload["productIntelligence"] = { products: [], fastMoving: [], slowMoving: [], topReturnRates: [] };
     if (domain === "all" || domain === "product") {
-      productIntelligence = await ProductIntelligenceService.getProductIntelligence({
-        businessId: bId,
-        dealershipId: dId,
-        dateFilter,
-        canViewCosts,
-        dealershipMap,
-      });
+      productIntelligence = await ProductIntelligenceService.getProductIntelligence({ businessId: bId, dealershipId: dId, dateFilter, canViewCosts, dealershipMap });
     }
 
-    let customerIntelligence: OperationalAnalyticsPayload["customerIntelligence"] = {
-      customers: [],
-      segmentCounts: {},
-      inactiveCustomers: [],
-      highCreditRisk: [],
-    };
+    let customerIntelligence: OperationalAnalyticsPayload["customerIntelligence"] = { customers: [], segmentCounts: {}, inactiveCustomers: [], highCreditRisk: [] };
     if (domain === "all" || domain === "customer") {
-      customerIntelligence = await CustomerIntelligenceService.getCustomerIntelligence({
-        businessId: bId,
-        dealershipId: dId,
-        dateFilter,
-        dealershipMap,
-      });
+      customerIntelligence = await CustomerIntelligenceService.getCustomerIntelligence({ businessId: bId, dealershipId: dId, dateFilter, dealershipMap });
     }
 
-    let salesmanPerformance: OperationalAnalyticsPayload["salesmanPerformance"] = {
-      salesmen: [],
-      topPerformers: [],
-    };
+    let salesmanPerformance: OperationalAnalyticsPayload["salesmanPerformance"] = { salesmen: [], topPerformers: [] };
     if (domain === "all" || domain === "salesman") {
-      salesmanPerformance = await SalesmanPerformanceService.getSalesmanPerformance({
-        businessId: bId,
-        dealershipId: dId,
-        dateFilter,
-        dealershipMap,
-      });
+      salesmanPerformance = await SalesmanPerformanceService.getSalesmanPerformance({ businessId: bId, dealershipId: dId, dateFilter, dealershipMap });
     }
 
-    let supplierIntelligence: OperationalAnalyticsPayload["supplierIntelligence"] = {
-      suppliers: [],
-      principalComparisons: [],
-    };
+    let supplierIntelligence: OperationalAnalyticsPayload["supplierIntelligence"] = { suppliers: [], principalComparisons: [] };
     if (domain === "all" || domain === "supplier") {
-      supplierIntelligence = await SupplierIntelligenceService.getSupplierIntelligence({
-        businessId: bId,
-        dealershipId: dId,
-        principalCompanyId: pCompId,
-        dateFilter,
-        canViewCosts,
-      });
+      supplierIntelligence = await SupplierIntelligenceService.getSupplierIntelligence({ businessId: bId, dealershipId: dId, principalCompanyId: pCompId, dateFilter, canViewCosts });
     }
 
-    let demandIntelligence: OperationalAnalyticsPayload["demandIntelligence"] = {
-      forecasts: [],
-      reorderAlerts: [],
-    };
+    let demandIntelligence: OperationalAnalyticsPayload["demandIntelligence"] = { forecasts: [], reorderAlerts: [] };
     if (domain === "all" || domain === "demand") {
-      demandIntelligence = await DemandIntelligenceService.getDemandForecasts({
-        businessId: bId,
-        dealershipId: dId,
-        principalCompanyId: pCompId,
-        dateFilter,
-      });
+      demandIntelligence = await DemandIntelligenceService.getDemandForecasts({ businessId: bId, dealershipId: dId, principalCompanyId: pCompId, dateFilter });
     }
 
     return {
-      filterScope: {
-        businessId: String(bId),
-        dealershipId: dId ? String(dId) : undefined,
-        principalCompanyId: pCompId ? String(pCompId) : undefined,
-        startDate: dateFilter.startDate,
-        endDate: dateFilter.endDate,
-      },
+      filterScope: { businessId: String(bId), dealershipId: dId ? String(dId) : undefined, principalCompanyId: pCompId ? String(pCompId) : undefined, startDate: dateFilter.startDate, endDate: dateFilter.endDate },
       productIntelligence,
       customerIntelligence,
       salesmanPerformance,
@@ -152,107 +88,47 @@ export class OperationalAnalyticsService {
     };
   }
 
-  /**
-   * Orchestrates physical & logistical Operational Intelligence across 6 operational domains.
-   */
-  static async getOperationalIntelligence(
-    params: OperationalFilterParams
-  ): Promise<OperationalIntelligencePayload> {
+  static async getOperationalIntelligence(params: OperationalFilterParams): Promise<OperationalIntelligencePayload> {
     const bId = new mongoose.Types.ObjectId(String(params.businessId));
     const dId = params.dealershipId ? new mongoose.Types.ObjectId(String(params.dealershipId)) : undefined;
-    const pCompId = params.principalCompanyId
-      ? new mongoose.Types.ObjectId(String(params.principalCompanyId))
-      : undefined;
+    const pCompId = params.principalCompanyId ? new mongoose.Types.ObjectId(String(params.principalCompanyId)) : undefined;
     const wId = params.warehouseId ? new mongoose.Types.ObjectId(String(params.warehouseId)) : undefined;
     const vId = params.vehicleId ? new mongoose.Types.ObjectId(String(params.vehicleId)) : undefined;
     const dmId = params.deliverymanId ? new mongoose.Types.ObjectId(String(params.deliverymanId)) : undefined;
 
-    const dateRange = DashboardDateHelper.parseDateRange({
-      preset: params.periodPreset || "last_30_days",
-      startDate: params.startDate,
-      endDate: params.endDate,
-    });
-
+    const dateRange = DashboardDateHelper.parseDateRange({ preset: params.periodPreset || "last_30_days", startDate: params.startDate, endDate: params.endDate });
     const canViewCosts = params.canViewCosts !== false;
-
-    const dealerships = await Dealership.find({
-      businessId: bId,
-      status: "active",
-      ...(dId ? { _id: dId } : {}),
-    }).lean();
-
-    const dealershipMap = new Map<string, { name: string; code: string }>();
-    dealerships.forEach((d) => {
-      dealershipMap.set(String(d._id), { name: d.name, code: d.code });
-    });
+    const dealershipMap = await this.getDealershipMap(bId, dId);
 
     const deliveryPerformance = await DeliveryPerformanceService.getDeliveryPerformance({
-      businessId: bId,
-      dealershipId: dId,
-      warehouseId: wId,
-      vehicleId: vId,
-      deliverymanId: dmId,
-      startDate: dateRange.startDate,
-      endDate: dateRange.endDate,
-      dealershipMap,
+      businessId: bId, dealershipId: dId, warehouseId: wId, vehicleId: vId, deliverymanId: dmId, startDate: dateRange.startDate, endDate: dateRange.endDate, dealershipMap,
     });
 
     const vehicleTripAnalytics = await VehicleTripService.getVehicleTripData({
-      businessId: bId,
-      dealershipId: dId,
-      warehouseId: wId,
-      vehicleId: vId,
-      startDate: dateRange.startDate,
-      endDate: dateRange.endDate,
-      canViewCosts,
+      businessId: bId, dealershipId: dId, warehouseId: wId, vehicleId: vId, startDate: dateRange.startDate, endDate: dateRange.endDate, canViewCosts,
     });
 
     const warehouseOperations = await WarehouseOperationsService.getWarehouseOperationsData({
-      businessId: bId,
-      dealershipId: dId,
-      warehouseId: wId,
-      startDate: dateRange.startDate,
-      endDate: dateRange.endDate,
+      businessId: bId, dealershipId: dId, warehouseId: wId, startDate: dateRange.startDate, endDate: dateRange.endDate,
     });
 
     const workerIntelligence = await WorkerIntelligenceService.getWorkerIntelligence({
-      businessId: bId,
-      dealershipId: dId,
-      warehouseId: wId,
-      workerId: params.workerId,
-      startDate: dateRange.startDate,
-      endDate: dateRange.endDate,
-      canViewCosts,
+      businessId: bId, dealershipId: dId, warehouseId: wId, workerId: params.workerId, startDate: dateRange.startDate, endDate: dateRange.endDate, canViewCosts,
     });
 
     const operationalCosts = await OperationalCostService.getOperationalCostData({
-      businessId: bId,
-      dealershipId: dId,
-      warehouseId: wId,
-      principalCompanyId: pCompId,
-      startDate: dateRange.startDate,
-      endDate: dateRange.endDate,
-      canViewCosts,
-      dealershipMap,
-      totalFulfilledDeliveries: deliveryPerformance.fulfilledDeliveriesCount,
-      totalDeliveredQuantity: deliveryPerformance.totalDeliveredQuantity,
+      businessId: bId, dealershipId: dId, warehouseId: wId, principalCompanyId: pCompId, startDate: dateRange.startDate, endDate: dateRange.endDate,
+      canViewCosts, dealershipMap, totalFulfilledDeliveries: deliveryPerformance.fulfilledDeliveriesCount, totalDeliveredQuantity: deliveryPerformance.totalDeliveredQuantity,
     });
 
     const bottlenecksAndRecommendations = OperationalBottleneckService.generateRecommendations({
-      delivery: deliveryPerformance,
-      warehouse: warehouseOperations,
-      costs: operationalCosts,
+      delivery: deliveryPerformance, warehouse: warehouseOperations, costs: operationalCosts,
     });
 
     return {
       filterScope: {
-        businessId: String(bId),
-        dealershipId: dId ? String(dId) : undefined,
-        principalCompanyId: pCompId ? String(pCompId) : undefined,
-        warehouseId: wId ? String(wId) : undefined,
-        vehicleId: vId ? String(vId) : undefined,
-        startDate: dateRange.startDate,
-        endDate: dateRange.endDate,
+        businessId: String(bId), dealershipId: dId ? String(dId) : undefined, principalCompanyId: pCompId ? String(pCompId) : undefined,
+        warehouseId: wId ? String(wId) : undefined, vehicleId: vId ? String(vId) : undefined, startDate: dateRange.startDate, endDate: dateRange.endDate,
       },
       deliveryPerformance,
       vehicleTripAnalytics,
@@ -262,5 +138,21 @@ export class OperationalAnalyticsService {
       bottlenecksAndRecommendations,
       generatedAt: new Date(),
     };
+  }
+
+  static async getDeliveryReport(params: OperationalFilterParams): Promise<DeliveryReportPayload> {
+    const bId = new mongoose.Types.ObjectId(String(params.businessId));
+    const dId = params.dealershipId ? new mongoose.Types.ObjectId(String(params.dealershipId)) : undefined;
+    const wId = params.warehouseId ? new mongoose.Types.ObjectId(String(params.warehouseId)) : undefined;
+    const vId = params.vehicleId ? new mongoose.Types.ObjectId(String(params.vehicleId)) : undefined;
+    const dmId = params.deliverymanId ? new mongoose.Types.ObjectId(String(params.deliverymanId)) : undefined;
+
+    const dateRange = DashboardDateHelper.parseDateRange({ preset: params.periodPreset || "last_30_days", startDate: params.startDate, endDate: params.endDate });
+    const dealershipMap = await this.getDealershipMap(bId, dId);
+
+    return DeliveryReportService.getDeliveryReportData({
+      businessId: bId, dealershipId: dId, warehouseId: wId, vehicleId: vId, deliverymanId: dmId,
+      startDate: dateRange.startDate, endDate: dateRange.endDate, canViewCosts: params.canViewCosts !== false, dealershipMap,
+    });
   }
 }
